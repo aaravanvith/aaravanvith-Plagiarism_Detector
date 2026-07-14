@@ -1,4 +1,4 @@
-# Originality Bench — VTU Report Plagiarism Detector
+# Plagiarism Detector — VTU Report Plagiarism Detector
 
 A full-stack implementation of the Major Project (BCI685) described in
 `Major_Project_3.pptx`: an **offline, explainable, ML-based plagiarism

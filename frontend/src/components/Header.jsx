@@ -10,7 +10,7 @@ export default function Header({ view, setView }) {
           </div>
           <div>
             <h1 className="font-display text-xl font-semibold text-ink-900 leading-tight">
-              Originality Bench
+              Plagiarism Detector
             </h1>
             <p className="text-xs text-ink-400 tracking-wide uppercase">
               VTU Project Report Plagiarism Detector
