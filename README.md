@@ -1,0 +1,140 @@
+# Originality Bench — VTU Report Plagiarism Detector
+
+A full-stack implementation of the Major Project (BCI685) described in
+`Major_Project_3.pptx`: an **offline, explainable, ML-based plagiarism
+detector for VTU project reports**, extended with the Phase‑2 features
+(AI‑generated content detection and a Correction Agent).
+
+---
+
+## 1. How this maps to your presentation
+
+| Slide | Requirement | Where it's implemented |
+|---|---|---|
+| 6 — ML Component | TF‑IDF + Cosine Similarity | `backend/app/services/similarity.py` (scikit-learn `TfidfVectorizer` + `cosine_similarity`) |
+| 6 — GenAI (dev-support only) | Not used to assess submissions | No LLM API is called at analysis time — everything is scikit-learn / rule-based, satisfying "GenAI is not used to assess or alter student submissions" |
+| 7 — Differentiators | Offline, explainable, VTU-specific | No internet calls at runtime; every score traces to a specific matched sentence + source |
+| 8 — Block Diagram | Documents → Preprocessing → ML Analysis → Output % | `extract.py` → `preprocessing.py` → `similarity.py` → `/api/analyze` response |
+| 12 — AI vs Human Detection | Stylometric AI-content classifier | `backend/app/services/ai_detection.py` (trained `LogisticRegression` over sentence-length burstiness, lexical diversity, stop-word ratio, punctuation variety) |
+| 13/14 — Correction Agent | Detect → Explain → Correct, chatbot | `backend/app/services/correction_agent.py` + `CorrectionPanel.jsx` (explanation, rewrite, APA/IEEE citation, chat) |
+| 16 — Sample Output | Score, flagged sentence, rewrite, citation | The results dashboard + Correction Agent panel reproduce this exact flow |
+
+---
+
+## 2. Architecture
+
+```
+ ┌────────────────────┐        REST/JSON        ┌──────────────────────────┐
+ │   React (Vite) UI   │  ───────────────────▶   │   FastAPI backend        │
+ │  - Upload           │  ◀───────────────────   │  - extract (pdf/docx/txt)│
+ │  - Score dashboard  │                          │  - preprocessing         │
+ │  - Correction Agent │                          │  - TF-IDF + cosine sim   │
+ │  - History          │                          │  - AI-content classifier │
+ └────────────────────┘                           │  - Correction Agent      │
+                                                    │  - SQLite persistence    │
+                                                    └──────────────────────────┘
+```
+
+- **Backend**: FastAPI + scikit-learn + SQLAlchemy/SQLite. No external ML
+  API keys required — the whole pipeline runs offline.
+- **Frontend**: React 19 + Vite + Tailwind CSS.
+- **Database**: SQLite (`backend/data/app.db`, created automatically). Every
+  analyzed report is also added to the comparison corpus, so it doubles as
+  a growing cross-student similarity check — exactly the "university-specific"
+  differentiator from Slide 7.
+
+---
+
+## 3. Setup
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv venv && source venv/bin/activate   # optional but recommended
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+The API is now at `http://localhost:8000` (interactive docs at `/docs`).
+A small reference corpus of sample academic paragraphs ships in
+`backend/reference_corpus/` so you get meaningful results immediately —
+add your own past student reports there (as `.txt`) for a real deployment.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. It talks to the backend at the URL in
+`frontend/.env` (`VITE_API_URL`, defaults to `http://localhost:8000`).
+
+---
+
+## 4. Using it
+
+1. **Analyze** — upload a `.pdf`, `.docx`, or `.txt` report (optionally with
+   student name/USN). You'll get:
+   - An overall plagiarism percentage + risk verdict (seal-style gauge)
+   - AI-generated-content likelihood with the stylometric features behind it
+   - A sentence-by-sentence breakdown; flagged lines are highlighted
+2. **Click any flagged sentence** to open the **Correction Agent**:
+   - *Explain* — why it was flagged, and against which source
+   - *Correct* — a rule-based rewrite suggestion
+   - *Citation* — an APA and IEEE citation template
+   - *Chat* — ask "Why is this flagged?" / "Can you rewrite this?" / "How do I cite this?"
+3. **Submission History** — every analyzed report, with delete support.
+
+---
+
+## 5. Notes for your viva / defense
+
+- **Why TF‑IDF + cosine similarity, not a transformer model?** It's fast,
+  fully explainable (you can point to the exact overlapping n‑grams), and
+  runs with zero GPU/internet dependency — directly satisfying the
+  "offline-capable, explainable" requirement in your problem statement.
+- **Why is the AI-detector a small LogisticRegression, not a downloaded
+  detector?** Pretrained AI-text detectors require downloading model
+  weights from the internet, which conflicts with the offline requirement.
+  Instead, a compact classifier is trained on well-documented stylometric
+  signatures of LLM output (low sentence-length burstiness, high lexical
+  uniformity) — transparent and reproducible, and it's a real `fit()` call,
+  not a hard-coded rule.
+- **Why is the Correction Agent rule-based rather than calling an LLM
+  API?** Slide 6 explicitly scopes GenAI to *development support only*,
+  never to assessing/altering submissions live — so the shipped agent uses
+  a bundled synonym table and templated explanations, keeping the system
+  self-contained.
+- **Extending it**: swap `reference_corpus/*.txt` for your department's
+  real past submissions, tune `FLAG_THRESHOLD`/`HIGH_RISK_THRESHOLD` in
+  `similarity.py`, or add authenticated faculty logins to `main.py`.
+
+---
+
+## 6. Project structure
+
+```
+plagiarism-detector/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                # FastAPI routes
+│   │   ├── database.py            # SQLAlchemy models (SQLite)
+│   │   └── services/
+│   │       ├── extract.py         # pdf/docx/txt → raw text
+│   │       ├── preprocessing.py   # cleaning, sentence split, stylometrics
+│   │       ├── similarity.py      # TF-IDF + cosine similarity engine
+│   │       ├── ai_detection.py    # AI-vs-human classifier
+│   │       └── correction_agent.py# explain / rewrite / cite / chat
+│   ├── reference_corpus/          # sample comparison documents
+│   └── requirements.txt
+└── frontend/
+    ├── src/
+    │   ├── components/            # UploadPanel, ScoreSeal, SentenceReport,
+    │   │                          # AIDetectionCard, CorrectionPanel, HistoryTable
+    │   ├── api.js                 # backend client
+    │   └── App.jsx
+    └── package.json
+```

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+venv/
+.venv/
+backend/.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+backend/data/app.db
+backend/data/ai_detector.joblib
