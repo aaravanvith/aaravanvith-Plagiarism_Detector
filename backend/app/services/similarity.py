@@ -14,10 +14,13 @@ Two levels of comparison are produced:
 """
 from dataclasses import dataclass, field
 
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from .preprocessing import split_sentences, clean_text
+from .semantic_similarity import semantic_similarity_matrix
+from ..settings import ENABLE_SEMANTIC_SIMILARITY
 
 FLAG_THRESHOLD = 0.55  # cosine similarity above this -> sentence flagged
 HIGH_RISK_THRESHOLD = 0.75
@@ -31,6 +34,10 @@ class SentenceMatch:
     best_source_sentence: str
     flagged: bool
     risk: str  # "low" | "medium" | "high"
+    tfidf_score: float = 0.0
+    cosine_score: float = 0.0
+    semantic_score: float = 0.0
+    hybrid_score: float = 0.0
 
 
 @dataclass
@@ -39,6 +46,8 @@ class SimilarityReport:
     verdict: str
     sentence_matches: list[SentenceMatch] = field(default_factory=list)
     sources_used: list[str] = field(default_factory=list)
+    semantic_enabled: bool = False
+    semantic_available: bool = False
 
 
 def _risk_label(score: float) -> str:
@@ -101,17 +110,43 @@ def analyze_document(
     target_vecs = tfidf_matrix[:n_target]
     ref_vecs = tfidf_matrix[n_target:]
 
-    sim_matrix = cosine_similarity(target_vecs, ref_vecs)  # (n_target, n_ref)
+    cosine_matrix = cosine_similarity(target_vecs, ref_vecs)  # (n_target, n_ref)
+
+    # This weighted TF-IDF overlap is distinct from cosine normalization: it
+    # captures how much of a target sentence's TF-IDF signal appears in a
+    # source sentence. Together with cosine and SBERT it forms the hybrid score.
+    target_dense = target_vecs.toarray()
+    reference_dense = ref_vecs.toarray()
+    target_weight = np.maximum(target_dense.sum(axis=1, keepdims=True), 1e-12)
+    tfidf_overlap_matrix = np.minimum(
+        target_dense[:, None, :], reference_dense[None, :, :]
+    ).sum(axis=2) / target_weight
+
+    semantic_matrix = (
+        semantic_similarity_matrix(target_sentences, [s for _, s in ref_sentence_records])
+        if ENABLE_SEMANTIC_SIMILARITY
+        else None
+    )
+    # When the optional model is disabled/unavailable, preserve the existing
+    # lexical cosine result exactly as the fallback score.
+    hybrid_matrix = (
+        (tfidf_overlap_matrix + cosine_matrix + semantic_matrix) / 3
+        if semantic_matrix is not None
+        else cosine_matrix
+    )
 
     matches: list[SentenceMatch] = []
     flagged_count = 0
     score_accum = 0.0
 
     for i, sentence in enumerate(target_sentences):
-        row = sim_matrix[i]
+        row = hybrid_matrix[i]
         best_j = int(row.argmax()) if row.size else -1
         best_score = float(row[best_j]) if best_j >= 0 else 0.0
         best_source, best_sentence = ref_sentence_records[best_j] if best_j >= 0 else ("-", "-")
+        tfidf_score = float(tfidf_overlap_matrix[i, best_j]) if best_j >= 0 else 0.0
+        cosine_score = float(cosine_matrix[i, best_j]) if best_j >= 0 else 0.0
+        semantic_score = float(semantic_matrix[i, best_j]) if semantic_matrix is not None and best_j >= 0 else 0.0
 
         flagged = best_score >= FLAG_THRESHOLD
         if flagged:
@@ -126,6 +161,10 @@ def analyze_document(
                 best_source_sentence=best_sentence,
                 flagged=flagged,
                 risk=_risk_label(best_score),
+                tfidf_score=round(tfidf_score * 100, 1),
+                cosine_score=round(cosine_score * 100, 1),
+                semantic_score=round(semantic_score * 100, 1),
+                hybrid_score=round(best_score * 100, 1),
             )
         )
 
@@ -141,4 +180,6 @@ def analyze_document(
         verdict=_verdict(overall),
         sentence_matches=matches,
         sources_used=sorted(reference_corpus.keys()),
+        semantic_enabled=ENABLE_SEMANTIC_SIMILARITY,
+        semantic_available=semantic_matrix is not None,
     )

@@ -48,3 +48,35 @@ export async function deleteReport(id) {
   const res = await fetch(`${BASE_URL}/api/reports/${id}`, { method: "DELETE" });
   return handle(res);
 }
+
+export async function repositoryStats() {
+  return handle(await fetch(`${BASE_URL}/api/repository/stats`));
+}
+
+export async function listRepositoryDocuments({ q = "", department = "", subject = "" } = {}) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (department) params.set("department", department);
+  if (subject) params.set("subject", subject);
+  return handle(await fetch(`${BASE_URL}/api/repository/documents?${params}`));
+}
+
+export async function uploadRepositoryDocument(file, metadata = {}) {
+  const form = new FormData();
+  form.append("file", file);
+  Object.entries(metadata).forEach(([key, value]) => form.append(key, value || ""));
+  return handle(await fetch(`${BASE_URL}/api/repository/documents`, { method: "POST", body: form }));
+}
+
+export async function archiveRepositoryDocument(id) {
+  return handle(await fetch(`${BASE_URL}/api/repository/documents/${id}/archive`, { method: "POST" }));
+}
+
+export async function coreStatus() {
+  return handle(await fetch(`${BASE_URL}/api/repository/core/status`));
+}
+
+export async function importFromCore(query, limit = 5) {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  return handle(await fetch(`${BASE_URL}/api/repository/core/import?${params}`, { method: "POST" }));
+}

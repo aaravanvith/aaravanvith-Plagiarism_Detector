@@ -38,6 +38,16 @@ export default function Header({ view, setView }) {
           >
             Submission History
           </button>
+          <button
+            onClick={() => setView("repository")}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+              view === "repository"
+                ? "bg-ink-800 text-white"
+                : "text-ink-600 hover:bg-ink-50"
+            }`}
+          >
+            Repository
+          </button>
         </nav>
       </div>
     </header>

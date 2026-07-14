@@ -1,12 +1,23 @@
 node_modules/
 dist/
+.vite/
 venv/
 .venv/
 backend/.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
 .env
 .env.*
 !.env.example
-backend/data/app.db
-backend/data/ai_detector.joblib
+
+# Local runtime data, model caches, and uploaded material
+backend/data/*.db
+backend/data/*.db-*
+backend/data/*.joblib
+backend/data/models/
+backend/data/uploads/
+backend/data/backups/

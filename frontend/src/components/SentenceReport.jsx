@@ -9,7 +9,7 @@ export default function SentenceReport({ sentences, onSelect, activeSentence }) 
     <div className="bg-white rounded-xl border border-ink-100 p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-display text-lg text-ink-900">Sentence-Level Evidence</h3>
-        <p className="text-xs text-ink-400">Click a highlighted line to open the Correction Agent</p>
+        <p className="text-xs text-ink-400">Click a highlighted line to inspect the hybrid score</p>
       </div>
       <div className="space-y-1 leading-relaxed">
         {sentences.map((s, i) => (
@@ -22,7 +22,13 @@ export default function SentenceReport({ sentences, onSelect, activeSentence }) 
           >
             {s.sentence}
             {s.flagged && (
-              <span className="ml-2 font-mono text-xs opacity-70">{s.similarity}%</span>
+              <>
+                <span className="ml-2 font-mono text-xs opacity-70">{s.hybrid_similarity ?? s.similarity}%</span>
+                <span className="ml-2 text-[11px] opacity-65">
+                  TF-IDF {s.tfidf_similarity ?? "–"}% · Cosine {s.cosine_similarity ?? "–"}%
+                  {s.semantic_similarity ? ` · Semantic ${s.semantic_similarity}%` : ""}
+                </span>
+              </>
             )}
           </p>
         ))}

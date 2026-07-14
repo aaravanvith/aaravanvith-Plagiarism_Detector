@@ -6,6 +6,7 @@ import AIDetectionCard from "./components/AIDetectionCard";
 import SentenceReport from "./components/SentenceReport";
 import CorrectionPanel from "./components/CorrectionPanel";
 import HistoryTable from "./components/HistoryTable";
+import RepositoryPanel from "./components/RepositoryPanel";
 import { analyzeReport } from "./api";
 import { FileSearch, Layers } from "lucide-react";
 
@@ -63,6 +64,11 @@ export default function App() {
                         compared against {result.sources_compared.length} reference source
                         {result.sources_compared.length === 1 ? "" : "s"}.
                       </p>
+                      <p className="text-xs text-ink-400 mb-3">
+                        {result.similarity_method?.semantic_available
+                          ? "Hybrid score: TF-IDF overlap + cosine similarity + SBERT semantic similarity."
+                          : "TF-IDF cosine scoring is active. Semantic scoring is unavailable or disabled."}
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {result.sources_compared.map((s) => (
                           <span key={s} className="text-xs font-mono bg-ink-50 text-ink-600 rounded px-2 py-1">
@@ -96,6 +102,7 @@ export default function App() {
         )}
 
         {view === "history" && <HistoryTable />}
+        {view === "repository" && <RepositoryPanel />}
       </main>
 
       {activeSentence && (

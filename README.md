@@ -43,6 +43,60 @@ detector for VTU project reports**, extended with the Phase‑2 features
   a growing cross-student similarity check — exactly the "university-specific"
   differentiator from Slide 7.
 
+### Optional hybrid similarity
+
+The plagiarism engine keeps the original TF-IDF/cosine workflow and adds an
+optional SBERT semantic score. For every matched sentence, the API returns
+`tfidf_similarity`, `cosine_similarity`, `semantic_similarity`, and
+`hybrid_similarity`. When SBERT is available, the hybrid score is the average
+of those three signals; if it is disabled or cannot load, scoring safely falls
+back to the original TF-IDF cosine result.
+
+Install the updated backend dependencies before running the enhancement:
+
+```bash
+pip install -r requirements.txt
+```
+
+On its first enabled analysis, Sentence Transformers downloads the public
+`all-MiniLM-L6-v2` model (about 80–90 MB; no API key, account, or GPU needed).
+Set `ENABLE_SEMANTIC_SIMILARITY=false` to disable this enhancement and keep
+the original offline-only comparison path. `SEMANTIC_MODEL_NAME` can override
+the default model.
+
+### Academic repository foundation
+
+The local repository now stores both legacy analyzed reports and faculty-added
+reference documents without changing the existing `/api/analyze` or report
+history APIs. SQLite development tables include academic metadata, document
+hashes, version number, approval/archive state, and separately indexed
+paragraph records with fingerprints and keywords. Existing data remains
+untouched because the schema addition is additive.
+
+Repository endpoints:
+
+- `POST /api/repository/documents` — add PDF, DOCX, TXT, Markdown, or RTF
+  reference material with optional academic metadata.
+- `GET /api/repository/documents?q=&department=&subject=` — search/filter
+  local documents.
+- `GET /api/repository/stats` — local document, paragraph, and word totals.
+- `POST /api/repository/documents/{id}/archive` and `/restore` — reversible
+  repository management.
+
+To create the new tables explicitly, run `python scripts/migrate.py` from the
+`backend` directory. This needs no API key, cloud account, or external service.
+
+### Optional CORE academic-paper importer
+
+CORE can supply open-access research papers to the local reference repository.
+It is optional: normal plagiarism analysis remains fully offline. Copy
+`backend/.env.example` to `backend/.env` and set a regenerated `CORE_API_KEY`;
+never commit or paste that value. The API exposes no endpoint that returns the
+key. Use `POST /api/repository/core/import?query=<topic>&limit=5` to import a
+small, rate-limited set of matching papers, then those papers participate in
+future local comparisons. CORE is used as a corpus provider, not as the model
+training database.
+
 ---
 
 ## 3. Setup
