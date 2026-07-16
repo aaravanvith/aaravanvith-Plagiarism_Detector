@@ -89,10 +89,10 @@ To create the new tables explicitly, run `python scripts/migrate.py` from the
 ### Optional CORE academic-paper importer
 
 CORE can supply open-access research papers to the local reference repository.
-It is optional: normal plagiarism analysis remains fully offline. Copy
-`backend/.env.example` to `backend/.env` and set a regenerated `CORE_API_KEY`;
-never commit or paste that value. The API exposes no endpoint that returns the
-key. Use `POST /api/repository/core/import?query=<topic>&limit=5` to import a
+It is optional: normal plagiarism analysis remains fully offline. Create or
+update `backend/.env` with a regenerated `CORE_API_KEY`; never commit or paste
+that value. The API exposes no endpoint that returns the key. Use
+`POST /api/repository/core/import?query=<topic>&limit=5` to import a
 small, rate-limited set of matching papers, then those papers participate in
 future local comparisons. CORE is used as a corpus provider, not as the model
 training database.
@@ -114,6 +114,24 @@ The API is now at `http://localhost:8000` (interactive docs at `/docs`).
 A small reference corpus of sample academic paragraphs ships in
 `backend/reference_corpus/` so you get meaningful results immediately —
 add your own past student reports there (as `.txt`) for a real deployment.
+
+### Optional Gemini rewriting
+
+The Correction Agent produces independent **Academic**, **Human**, and
+**Simple** rewrites. Gemini is selected when `GEMINI_API_KEY` is configured;
+otherwise the service uses `OPENAI_API_KEY`, then uses its local structural
+rewriter only when neither provider is configured.
+
+Add the following to `backend/.env` (never commit the key):
+
+```env
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_REWRITE_MODEL=gemini-3.5-flash
+```
+
+The official `google-genai` SDK is included in `backend/requirements.txt`.
+A configured Gemini or OpenAI provider returns an error if it cannot generate
+a valid rewrite; it does not silently switch to the offline fallback.
 
 ### Frontend
 
@@ -157,11 +175,14 @@ Open `http://localhost:5173`. It talks to the backend at the URL in
   signatures of LLM output (low sentence-length burstiness, high lexical
   uniformity) — transparent and reproducible, and it's a real `fit()` call,
   not a hard-coded rule.
-- **Why is the Correction Agent rule-based rather than calling an LLM
-  API?** Slide 6 explicitly scopes GenAI to *development support only*,
-  never to assessing/altering submissions live — so the shipped agent uses
-  a bundled synonym table and templated explanations, keeping the system
-  self-contained.
+- **How does the Correction Agent rewrite text?** Gemini and OpenAI generate
+  independent Academic, Human, and Simple rewrites when their respective API
+  keys are configured. A structural offline fallback is retained for local
+  demonstrations without a rewrite-provider key.
+- **Current Correction Agent provider:** Gemini is preferred when
+  `GEMINI_API_KEY` is configured; otherwise OpenAI is used when
+  `OPENAI_API_KEY` is available. The local structural rewriter is used only
+  when neither provider is configured.
 - **Extending it**: swap `reference_corpus/*.txt` for your department's
   real past submissions, tune `FLAG_THRESHOLD`/`HIGH_RISK_THRESHOLD` in
   `similarity.py`, or add authenticated faculty logins to `main.py`.

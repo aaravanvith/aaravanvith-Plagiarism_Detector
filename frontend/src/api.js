@@ -21,11 +21,11 @@ export async function analyzeReport(file, studentName, usn) {
   return handle(res);
 }
 
-export async function correctSentence(sentence, matched_source, similarity) {
+export async function correctSentence(sentence, matched_source, similarity, rewrite_strength = "moderate") {
   const res = await fetch(`${BASE_URL}/api/correct`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sentence, matched_source, similarity }),
+    body: JSON.stringify({ sentence, matched_source, similarity, rewrite_strength }),
   });
   return handle(res);
 }

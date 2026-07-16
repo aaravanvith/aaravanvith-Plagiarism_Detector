@@ -131,6 +131,10 @@ async def analyze(
             {
                 "sentence": m.sentence,
                 "similarity": m.best_score,
+                # The correction panel is opened from this list, so retain
+                # the match context required by the correction/chat endpoints.
+                "matched_source": m.best_source,
+                "matched_text": m.best_source_sentence,
                 "risk": m.risk,
                 "flagged": m.flagged,
                 "tfidf_similarity": m.tfidf_score,
@@ -147,11 +151,15 @@ class CorrectRequest(BaseModel):
     sentence: str
     matched_source: str
     similarity: float
+    rewrite_strength: str = "moderate"
 
 
 @app.post("/api/correct")
 def correct(req: CorrectRequest):
-    return ca.correct_sentence(req.sentence, req.matched_source, req.similarity)
+    try:
+        return ca.correct_sentence(req.sentence, req.matched_source, req.similarity, strength=req.rewrite_strength)
+    except ca.RewriteProviderConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 class ChatRequest(BaseModel):

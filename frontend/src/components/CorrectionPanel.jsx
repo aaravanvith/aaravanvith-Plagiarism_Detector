@@ -4,24 +4,30 @@ import { correctSentence, sendChat } from "../api";
 
 export default function CorrectionPanel({ sentence, onClose }) {
   const [correction, setCorrection] = useState(null);
+  const [rewriteMode, setRewriteMode] = useState("academic");
+  const [rewriteStrength, setRewriteStrength] = useState("moderate");
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [requestError, setRequestError] = useState("");
 
   useEffect(() => {
     if (!sentence) return;
     setLoading(true);
     setMessages([]);
-    correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity)
+    setRewriteMode("academic");
+    setRequestError("");
+    correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity, rewriteStrength)
       .then((res) => {
         setCorrection(res);
         setMessages([
           { from: "agent", text: res.explanation },
         ]);
       })
+      .catch((error) => setRequestError(error.message || "Could not load the correction agent."))
       .finally(() => setLoading(false));
-  }, [sentence]);
+  }, [sentence, rewriteStrength]);
 
   const send = async (e) => {
     e.preventDefault();
@@ -29,10 +35,13 @@ export default function CorrectionPanel({ sentence, onClose }) {
     const userMsg = input;
     setMessages((m) => [...m, { from: "user", text: userMsg }]);
     setInput("");
+    setRequestError("");
     setSending(true);
     try {
       const res = await sendChat(userMsg, sentence.sentence, sentence.matched_source, sentence.similarity);
       setMessages((m) => [...m, { from: "agent", text: res.reply }]);
+    } catch (error) {
+      setRequestError(error.message || "The correction agent could not answer right now.");
     } finally {
       setSending(false);
     }
@@ -66,9 +75,44 @@ export default function CorrectionPanel({ sentence, onClose }) {
 
         {correction && (
           <>
-            <Section title="Suggested rewrite">
+            <Section title="Rewrite suggestions">
+              <label className="mb-2 flex items-center justify-between gap-3 text-xs text-ink-500">
+                Rewrite strength
+                <select
+                  value={rewriteStrength}
+                  onChange={(event) => setRewriteStrength(event.target.value)}
+                  className="rounded border border-ink-100 bg-white px-2 py-1 text-xs text-ink-700 focus:outline-none focus:ring-2 focus:ring-seal-400"
+                >
+                  <option value="light">Light</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="strong">Strong</option>
+                  <option value="maximum">Maximum</option>
+                </select>
+              </label>
+              <div className="flex gap-1 mb-2" role="tablist" aria-label="Rewrite mode">
+                {[
+                  ["academic", "Academic"],
+                  ["human", "Human"],
+                  ["simple", "Simple"],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={rewriteMode === mode}
+                    onClick={() => setRewriteMode(mode)}
+                    className={`rounded px-2.5 py-1 text-xs ${
+                      rewriteMode === mode
+                        ? "bg-ink-800 text-white"
+                        : "bg-ink-50 text-ink-600 hover:bg-ink-100"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <p className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
-                {correction.rewritten}
+                {correction.rewrites?.[rewriteMode] || correction.rewritten}
               </p>
             </Section>
 
@@ -98,6 +142,7 @@ export default function CorrectionPanel({ sentence, onClose }) {
               </div>
             ))}
             {sending && <p className="text-xs text-ink-400">Thinking…</p>}
+            {requestError && <p role="alert" className="text-xs text-risk-high">{requestError}</p>}
           </div>
         </Section>
       </div>
@@ -111,6 +156,7 @@ export default function CorrectionPanel({ sentence, onClose }) {
         />
         <button
           type="submit"
+          disabled={sending}
           className="rounded-md bg-ink-800 text-white px-3 py-2 hover:bg-ink-900"
         >
           <Send className="h-4 w-4" />
