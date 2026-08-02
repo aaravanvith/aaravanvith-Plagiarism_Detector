@@ -13,10 +13,7 @@ import re
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-try:
-    from google import genai
-except ImportError:  # Raised as a clear configuration error when Gemini is selected.
-    genai = None
+from .ollama_client import ollama_rewrite
 
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#.-]*")
 _FILLER_RE = re.compile(r"^(put differently|in other words|simply put|to rephrase)\b", re.I)
@@ -293,15 +290,9 @@ def _openai_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") ->
 def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, str]:
     """Create independent, validated mode outputs for instant client-side tabs."""
     strength = strength if strength in {"light", "moderate", "strong", "maximum"} else "moderate"
-    if os.getenv("GEMINI_API_KEY", ""):
-        generator = _gemini_rewrite
-        provider = "Gemini"
-    elif os.getenv("OPENAI_API_KEY", ""):
-        generator = _openai_rewrite
-        provider = "OpenAI"
-    else:
-        generator = None
-        provider = "offline"
+    
+    generator = ollama_rewrite
+    provider = "Ollama"
 
     rewrites: dict[str, str] = {}
     for mode in _MODES:

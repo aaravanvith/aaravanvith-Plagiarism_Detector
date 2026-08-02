@@ -1,0 +1,3 @@
+Is Calcitonin at 6-12 Months an Appropriate Criterion to Define Cure in Medullary Thyroid Carcinoma?
+
+Current recommendations from the American Thyroid Association define undetectable calcitonin (Ct) at 6-12 months after surgery as biochemical cure in medullary thyroid carcinoma (MTC). This criterion has also been used in some studies to assess the risk of recurrence. However, this definition may not accurately reflect disease behavior as some patients with early biochemical persistence later normalize Ct, whereas others never develop structural disease.

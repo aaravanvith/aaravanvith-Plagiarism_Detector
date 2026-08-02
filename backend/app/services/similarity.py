@@ -22,7 +22,7 @@ from .preprocessing import split_sentences, clean_text
 from .semantic_similarity import semantic_similarity_matrix
 from ..settings import ENABLE_SEMANTIC_SIMILARITY
 
-FLAG_THRESHOLD = 0.55  # cosine similarity above this -> sentence flagged
+FLAG_THRESHOLD = 0.50  # cosine similarity above this -> sentence flagged
 HIGH_RISK_THRESHOLD = 0.75
 
 
@@ -115,12 +115,16 @@ def analyze_document(
     # This weighted TF-IDF overlap is distinct from cosine normalization: it
     # captures how much of a target sentence's TF-IDF signal appears in a
     # source sentence. Together with cosine and SBERT it forms the hybrid score.
-    target_dense = target_vecs.toarray()
-    reference_dense = ref_vecs.toarray()
-    target_weight = np.maximum(target_dense.sum(axis=1, keepdims=True), 1e-12)
-    tfidf_overlap_matrix = np.minimum(
-        target_dense[:, None, :], reference_dense[None, :, :]
-    ).sum(axis=2) / target_weight
+    binary_target = target_vecs.copy()
+    binary_target.data = np.ones_like(binary_target.data)
+
+    binary_ref = ref_vecs.copy()
+    binary_ref.data = np.ones_like(binary_ref.data)
+
+    shared_terms = (binary_target @ binary_ref.T).toarray()
+    target_terms = np.asarray(binary_target.sum(axis=1)).ravel()[:, None]
+
+    tfidf_overlap_matrix = shared_terms / np.maximum(target_terms, 1)  
 
     semantic_matrix = (
         semantic_similarity_matrix(target_sentences, [s for _, s in ref_sentence_records])
@@ -173,7 +177,7 @@ def analyze_document(
     # a real similarity-report tool (e.g. Turnitin-style overall index).
     flagged_ratio = flagged_count / len(target_sentences)
     mean_sim = score_accum / len(target_sentences)
-    overall = round(min(100.0, (0.65 * flagged_ratio + 0.35 * mean_sim) * 100), 1)
+    overall = round(min(100.0, (0.40 * flagged_ratio + 0.60 * mean_sim) * 100), 1)
 
     return SimilarityReport(
         overall_score=overall,

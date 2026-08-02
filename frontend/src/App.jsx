@@ -61,8 +61,7 @@ export default function App() {
                       <h2 className="font-display text-2xl text-ink-900 mb-1">{result.filename}</h2>
                       <p className="text-sm text-ink-500 mb-4">
                         {result.flagged_sentence_count} of {result.total_sentences} sentences flagged,
-                        compared against {result.sources_compared.length} reference source
-                        {result.sources_compared.length === 1 ? "" : "s"}.
+                        Compared against {result.total_sources_compared} reference sources.
                       </p>
                       <p className="text-xs text-ink-400 mb-3">
                         {result.similarity_method?.semantic_available

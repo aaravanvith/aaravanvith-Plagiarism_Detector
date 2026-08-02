@@ -1,0 +1,3 @@
+Esophageal and Gastric Cancers.
+
+Esophageal and gastric cancers carry high mortality due to late-stage diagnosis, necessitating accurate staging and response assessment. Fluorine-18 fluorodeoxyglucose (18F-FDG) PET/computed tomography (CT) integrates metabolic and anatomic imaging, playing a pivotal role in detecting occult metastases, guiding therapy decisions, and assessing early treatment response. It is particularly effective in esophageal cancer and intestinal-type gastric adenocarcinoma, but has limited sensitivity in diffuse and mucinous subtypes. PET/CT enhances radiotherapy planning and distinguishes recurrence from post-treatment changes.

@@ -26,24 +26,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+HEALTHCARE_KEYWORDS = [
+    "health", "healthcare", "medical", "medicine",
+    "hospital", "patient", "doctor", "clinical",
+    "diagnosis", "treatment", "disease", "covid",
+    "diabetes", "cancer", "blood", "heart"
+]
+
+def is_healthcare_report(text: str) -> bool:
+    text = text.lower()
+    matches = sum(1 for word in HEALTHCARE_KEYWORDS if word in text)
+    return matches >= 3
+
 
 @app.on_event("startup")
 def on_startup():
     init_db()
 
 
-def load_reference_corpus(db: Session) -> dict[str, str]:
+
+def load_reference_corpus(db: Session, current_filename: str = "") -> dict[str, str]:
     corpus: dict[str, str] = {}
+
     for f in REFERENCE_CORPUS_DIR.glob("*.txt"):
         corpus[f.stem] = f.read_text(encoding="utf-8", errors="ignore")
-    # also compare against previously submitted reports (cross-student check)
+
     for r in db.query(Report).all():
+        if r.filename == current_filename:
+            continue
         corpus[f"prior_submission::{r.filename}"] = r.text
-    # Standalone repository items (e.g. papers imported by faculty) are also
-    # included while avoiding duplicate records created from legacy reports.
-    for d in db.query(AcademicDocument).filter(AcademicDocument.source_report_id.is_(None), AcademicDocument.is_archived.is_(False)).all():
+
+    for d in db.query(AcademicDocument).filter(
+        AcademicDocument.source_report_id.is_(None),
+        AcademicDocument.is_archived.is_(False)
+    ).all():
         corpus[f"repository::{d.title or d.filename}"] = d.text
+
     return corpus
+    
 
 
 @app.get("/api/health")
@@ -64,10 +84,19 @@ async def analyze(
 
     raw_text = extract_text(file.filename, content)
     text = clean_text(raw_text)
+
     if len(text.split()) < 20:
         raise HTTPException(400, "Could not extract enough text from this file (need 20+ words)")
 
-    corpus = load_reference_corpus(db)
+    print(is_healthcare_report(text))
+
+    if not is_healthcare_report(text):
+        raise HTTPException(
+            status_code=400,
+            detail="Only healthcare-related reports are supported in this prototype."
+    )
+
+    corpus = load_reference_corpus(db, file.filename)
     sim_report = analyze_document(text, corpus)
     ai_report = detect_ai_content(text)
 
@@ -104,7 +133,8 @@ async def analyze(
         "filename": file.filename,
         "plagiarism_score": sim_report.overall_score,
         "verdict": sim_report.verdict,
-        "sources_compared": sim_report.sources_used,
+        "total_sources_compared": len(sim_report.sources_used),
+        "sources_compared": sim_report.sources_used[:10],
         "total_sentences": len(sim_report.sentence_matches),
         "flagged_sentence_count": len(flagged),
         "ai_detection": ai_report,
