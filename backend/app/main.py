@@ -1,20 +1,30 @@
 from pathlib import Path
+import logging
+import shutil
+import threading
+from time import perf_counter
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from .database import AcademicDocument, DocumentParagraph, init_db, get_db, Report
+from .database import AcademicDocument, DocumentParagraph, init_db, get_db, Report, SessionLocal
 from .services.extract import extract_text
 from .services.preprocessing import clean_text
 from .services.similarity import analyze_document
+from .services.semantic_similarity import invalidate_reference_embedding_cache
 from .services.ai_detection import detect_ai_content
 from .services import correction_agent as ca
+from .services.document_correction import (
+    CorrectionValidationError, create_corrected_file, parse_corrections,
+)
 from .services.core_client import CoreConfigurationError, CoreRequestError, configured as core_configured, search_works
-from .services.repository import add_document, document_summary
+from .services.repository import add_document, content_hash, document_summary
 
 REFERENCE_CORPUS_DIR = Path(__file__).resolve().parent.parent / "reference_corpus"
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="VTU Report Plagiarism Detector API", version="1.0.0")
 
@@ -24,6 +34,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Applied-Corrections", "X-Skipped-Corrections"],
 )
 
 HEALTHCARE_KEYWORDS = [
@@ -42,27 +53,79 @@ def is_healthcare_report(text: str) -> bool:
 @app.on_event("startup")
 def on_startup():
     init_db()
+    db = SessionLocal()
+    try:
+        _reference_corpus_cache.rebuild(db)
+    finally:
+        db.close()
 
+
+
+class ReferenceCorpusCache:
+    """Cache static references while retaining prior student reports dynamically."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._corpus: dict[str, str] | None = None
+
+    def rebuild(self, db: Session) -> None:
+        corpus: dict[str, str] = {}
+        for source_file in REFERENCE_CORPUS_DIR.glob("*.txt"):
+            corpus[source_file.stem] = source_file.read_text(encoding="utf-8", errors="ignore")
+        for document in db.query(AcademicDocument).filter(
+            AcademicDocument.source_report_id.is_(None),
+            AcademicDocument.is_archived.is_(False),
+        ).all():
+            corpus[f"repository::{document.title or document.filename}"] = document.text
+        with self._lock:
+            self._corpus = corpus
+        invalidate_reference_embedding_cache()
+        logger.info("Reference corpus cache rebuilt with %d static sources", len(corpus))
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._corpus = None
+        invalidate_reference_embedding_cache()
+
+    def static_corpus(self, db: Session) -> dict[str, str]:
+        with self._lock:
+            cached = self._corpus
+        if cached is None:
+            self.rebuild(db)
+            with self._lock:
+                cached = self._corpus
+        return dict(cached or {})
+
+
+_reference_corpus_cache = ReferenceCorpusCache()
+
+
+def invalidate_reference_corpus_cache() -> None:
+    _reference_corpus_cache.invalidate()
 
 
 def load_reference_corpus(db: Session, current_filename: str = "") -> dict[str, str]:
-    corpus: dict[str, str] = {}
+    """
+    Load only the repository/reference documents.
+    Do NOT compare against previous student submissions.
+    """
+    corpus = _reference_corpus_cache.static_corpus(db)
 
-    for f in REFERENCE_CORPUS_DIR.glob("*.txt"):
-        corpus[f.stem] = f.read_text(encoding="utf-8", errors="ignore")
+    print("=" * 80)
+    print("REFERENCE CORPUS")
+    print("=" * 80)
+    print("Total sources:", len(corpus))
 
-    for r in db.query(Report).all():
-        if r.filename == current_filename:
-            continue
-        corpus[f"prior_submission::{r.filename}"] = r.text
-
-    for d in db.query(AcademicDocument).filter(
-        AcademicDocument.source_report_id.is_(None),
-        AcademicDocument.is_archived.is_(False)
-    ).all():
-        corpus[f"repository::{d.title or d.filename}"] = d.text
+    count = 0
+    for key in corpus.keys():
+        print(key)
+        count += 1
+        if count >= 20:
+            break
 
     return corpus
+
+    
     
 
 
@@ -78,11 +141,14 @@ async def analyze(
     usn: str = Form(""),
     db: Session = Depends(get_db),
 ):
+    analysis_started = perf_counter()
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file uploaded")
 
+    extraction_started = perf_counter()
     raw_text = extract_text(file.filename, content)
+    logger.info("Text extraction completed in %.3fs", perf_counter() - extraction_started)
     text = clean_text(raw_text)
 
     if len(text.split()) < 20:
@@ -96,8 +162,12 @@ async def analyze(
             detail="Only healthcare-related reports are supported in this prototype."
     )
 
+    corpus_started = perf_counter()
     corpus = load_reference_corpus(db, file.filename)
-    sim_report = analyze_document(text, corpus)
+    logger.info("Corpus loading completed in %.3fs", perf_counter() - corpus_started)
+    # The analyzer's normalization is unchanged, but its sentence offsets must
+    # refer to the exact text extracted from this uploaded file.
+    sim_report = analyze_document(raw_text, corpus)
     ai_report = detect_ai_content(text)
 
     record = Report(
@@ -114,17 +184,21 @@ async def analyze(
     db.commit()
     db.refresh(record)
 
-    add_document(
-        db,
-        filename=file.filename,
-        raw_text=raw_text,
-        text=text,
-        metadata={"student_name": student_name or None, "usn": usn or None},
-        source_report_id=record.id,
-        ai_score=ai_report["ai_probability"],
-        similarity_score=sim_report.overall_score,
-    )
-    db.commit()
+    #add_document(
+    #   db,
+    #   filename=file.filename,
+    #   raw_text=raw_text,
+    #   text=text,
+    #   metadata={"student_name": student_name or None, "usn": usn or None},
+    #   source_report_id=record.id,
+    #   ai_score=ai_report["ai_probability"],
+    #   similarity_score=sim_report.overall_score,
+    #)
+    #db.commit()
+    # The report is intentionally not part of the persistent corpus cache, but
+    # it is a reference on the next request so invalidate assembled matrices.
+    invalidate_reference_embedding_cache()
+    logger.info("Total analysis completed in %.3fs", perf_counter() - analysis_started)
 
     flagged = [m for m in sim_report.sentence_matches if m.flagged]
 
@@ -154,6 +228,8 @@ async def analyze(
                 "cosine_similarity": m.cosine_score,
                 "semantic_similarity": m.semantic_score,
                 "hybrid_similarity": m.hybrid_score,
+                "start_offset": m.start_offset,
+                "end_offset": m.end_offset,
             }
             for m in flagged
         ],
@@ -171,9 +247,12 @@ async def analyze(
                 "cosine_similarity": m.cosine_score,
                 "semantic_similarity": m.semantic_score,
                 "hybrid_similarity": m.hybrid_score,
+                "start_offset": m.start_offset,
+                "end_offset": m.end_offset,
             }
             for m in sim_report.sentence_matches
         ],
+        "extracted_text": raw_text,
     }
 
 
@@ -182,14 +261,54 @@ class CorrectRequest(BaseModel):
     matched_source: str
     similarity: float
     rewrite_strength: str = "moderate"
+    start_offset: int | None = None
+    end_offset: int | None = None
 
 
 @app.post("/api/correct")
 def correct(req: CorrectRequest):
     try:
-        return ca.correct_sentence(req.sentence, req.matched_source, req.similarity, strength=req.rewrite_strength)
+        response = ca.correct_sentence(req.sentence, req.matched_source, req.similarity, strength=req.rewrite_strength)
+        response["start_offset"] = req.start_offset
+        response["end_offset"] = req.end_offset
+        return response
     except ca.RewriteProviderConfigurationError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/auto-correct")
+async def auto_correct(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    corrections: str = Form(...),
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(422, "The uploaded file could not be processed.")
+    try:
+        correction_list = parse_corrections(corrections)
+        output, download_name, media_type, summary = create_corrected_file(
+    file.filename,
+    content,
+    correction_list,
+)
+    except CorrectionValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    background_tasks.add_task(shutil.rmtree, output.parent, ignore_errors=True)
+    # FileResponse streams the separately-generated copy; the source upload is
+    # never changed on disk or in the database.
+    return FileResponse(
+        output,
+        media_type=media_type,
+        filename=download_name,
+        headers={
+            "X-Applied-Corrections": str(summary["applied"]),
+            "X-Skipped-Corrections": str(len(summary["skipped"])),
+        },
+    )
 
 
 class ChatRequest(BaseModel):
@@ -252,6 +371,7 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Report not found")
     db.delete(r)
     db.commit()
+    invalidate_reference_embedding_cache()
     return {"deleted": True}
 
 
@@ -295,6 +415,7 @@ async def upload_repository_document(
     )
     db.commit()
     db.refresh(document)
+    invalidate_reference_corpus_cache()
     return document_summary(document)
 
 
@@ -375,6 +496,7 @@ def import_from_core(
         )
         imported.append(document_summary(document))
     db.commit()
+    invalidate_reference_corpus_cache()
     return {"query": query, "imported_count": len(imported), "documents": imported}
 
 
@@ -385,6 +507,7 @@ def archive_repository_document(document_id: int, db: Session = Depends(get_db))
         raise HTTPException(404, "Repository document not found")
     document.is_archived = True
     db.commit()
+    invalidate_reference_corpus_cache()
     return {"archived": True}
 
 
@@ -395,4 +518,5 @@ def restore_repository_document(document_id: int, db: Session = Depends(get_db))
         raise HTTPException(404, "Repository document not found")
     document.is_archived = False
     db.commit()
+    invalidate_reference_corpus_cache()
     return {"restored": True}

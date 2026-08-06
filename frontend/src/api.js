@@ -21,13 +21,43 @@ export async function analyzeReport(file, studentName, usn) {
   return handle(res);
 }
 
-export async function correctSentence(sentence, matched_source, similarity, rewrite_strength = "moderate") {
+export async function correctSentence(sentence, matched_source, similarity, rewrite_strength = "moderate", start_offset, end_offset) {
   const res = await fetch(`${BASE_URL}/api/correct`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sentence, matched_source, similarity, rewrite_strength }),
+    body: JSON.stringify({ sentence, matched_source, similarity, rewrite_strength, start_offset, end_offset }),
   });
   return handle(res);
+}
+
+export async function autoCorrectDocument(file, corrections) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("corrections", JSON.stringify(corrections));
+  const response = await fetch(`${BASE_URL}/api/auto-correct`, { method: "POST", body: form });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { detail = (await response.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+
+  const applied = Number.parseInt(response.headers.get("x-applied-corrections") || "0", 10) || 0;
+  const skippedCount = Number.parseInt(response.headers.get("x-skipped-corrections") || "0", 10) || 0;
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get("content-disposition")),
+    summary: {
+      applied,
+      // The current UI renders skipped entries as warning rows. The direct
+      // file response supplies counts only, so retain that compatible shape.
+      skipped: Array.from({ length: skippedCount }, () => ({ reason: "A correction could not be applied." })),
+    },
+  };
+}
+
+function filenameFromDisposition(disposition) {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || "Corrected_Report";
 }
 
 export async function sendChat(message, sentence, matched_source, similarity) {

@@ -13,6 +13,8 @@ Two levels of comparison are produced:
      the Correction Agent (Slide 13).
 """
 from dataclasses import dataclass, field
+import logging
+import re
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -22,8 +24,9 @@ from .preprocessing import split_sentences, clean_text
 from .semantic_similarity import semantic_similarity_matrix
 from ..settings import ENABLE_SEMANTIC_SIMILARITY
 
-FLAG_THRESHOLD = 0.50  # cosine similarity above this -> sentence flagged
+FLAG_THRESHOLD = 0.30  # cosine similarity above this -> sentence flagged
 HIGH_RISK_THRESHOLD = 0.75
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,6 +41,8 @@ class SentenceMatch:
     cosine_score: float = 0.0
     semantic_score: float = 0.0
     hybrid_score: float = 0.0
+    start_offset: int = 0
+    end_offset: int = 0
 
 
 @dataclass
@@ -76,6 +81,9 @@ def analyze_document(
                        (bundled sample papers + previously submitted reports)
     """
     target_sentences = split_sentences(target_text)
+    # Keep offsets in the extracted document, not in a rewritten copy.  The
+    # scoring input remains the existing normalized sentence list.
+    sentence_offsets = _sentence_offsets(target_text, target_sentences)
     if not target_sentences:
         return SimilarityReport(overall_score=0.0, verdict="LOW")
 
@@ -87,12 +95,18 @@ def analyze_document(
         for s in split_sentences(src_text):
             if len(s.split()) >= 4:
                 ref_sentence_records.append((src_name, s))
+    logger.info("Sentence splitting: upload=%d, references=%d, sources=%d", len(target_sentences), len(ref_sentence_records), len(reference_corpus))
 
     if not ref_sentence_records:
         return SimilarityReport(
             overall_score=0.0, verdict="LOW",
             sentence_matches=[
-                SentenceMatch(s, 0.0, "-", "-", False, "low") for s in target_sentences
+                SentenceMatch(
+                    s, 0.0, "-", "-", False, "low",
+                    start_offset=sentence_offsets[index][0],
+                    end_offset=sentence_offsets[index][1],
+                )
+                for index, s in enumerate(target_sentences)
             ],
         )
 
@@ -105,6 +119,7 @@ def analyze_document(
         sublinear_tf=True,
     )
     tfidf_matrix = vectorizer.fit_transform(corpus_texts)
+    logger.info("TF-IDF: vocabulary=%d, matrix=%s", len(vectorizer.vocabulary_), tfidf_matrix.shape)
 
     n_target = len(target_sentences)
     target_vecs = tfidf_matrix[:n_target]
@@ -115,28 +130,41 @@ def analyze_document(
     # This weighted TF-IDF overlap is distinct from cosine normalization: it
     # captures how much of a target sentence's TF-IDF signal appears in a
     # source sentence. Together with cosine and SBERT it forms the hybrid score.
-    binary_target = target_vecs.copy()
-    binary_target.data = np.ones_like(binary_target.data)
-
-    binary_ref = ref_vecs.copy()
-    binary_ref.data = np.ones_like(binary_ref.data)
-
-    shared_terms = (binary_target @ binary_ref.T).toarray()
-    target_terms = np.asarray(binary_target.sum(axis=1)).ravel()[:, None]
-
-    tfidf_overlap_matrix = shared_terms / np.maximum(target_terms, 1)  
+    tfidf_overlap_matrix = target_vecs.dot(ref_vecs.T).toarray()
+    tfidf_overlap_matrix = np.minimum(cosine_matrix, tfidf_overlap_matrix)  
+    logger.info("TF-IDF overlap distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(tfidf_overlap_matrix)), float(np.percentile(tfidf_overlap_matrix, 95)), float(tfidf_overlap_matrix.max()))
+    logger.info("Cosine distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(cosine_matrix)), float(np.percentile(cosine_matrix, 95)), float(cosine_matrix.max()))
 
     semantic_matrix = (
         semantic_similarity_matrix(target_sentences, [s for _, s in ref_sentence_records])
         if ENABLE_SEMANTIC_SIMILARITY
         else None
     )
+    if semantic_matrix is not None:
+        logger.info("SBERT distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(semantic_matrix)), float(np.percentile(semantic_matrix, 95)), float(semantic_matrix.max()))
     # When the optional model is disabled/unavailable, preserve the existing
     # lexical cosine result exactly as the fallback score.
     hybrid_matrix = (
-        (tfidf_overlap_matrix + cosine_matrix + semantic_matrix) / 3
+        (
+            0.35 * tfidf_overlap_matrix +
+            0.35 * cosine_matrix +
+            0.30 * semantic_matrix
+        )
         if semantic_matrix is not None
-        else cosine_matrix
+        else (
+            0.5 * tfidf_overlap_matrix +
+            0.5 * cosine_matrix
+        )
+   )
+    logger.info("Hybrid distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(hybrid_matrix)), float(np.percentile(hybrid_matrix, 95)), float(hybrid_matrix.max()))
+    highest_target, highest_reference = np.unravel_index(int(hybrid_matrix.argmax()), hybrid_matrix.shape)
+    logger.info(
+        "Highest sentence pair: source=%s tfidf_overlap=%.4f cosine=%.4f sbert=%s hybrid=%.4f",
+        ref_sentence_records[highest_reference][0],
+        float(tfidf_overlap_matrix[highest_target, highest_reference]),
+        float(cosine_matrix[highest_target, highest_reference]),
+        f"{semantic_matrix[highest_target, highest_reference]:.4f}" if semantic_matrix is not None else "disabled",
+        float(hybrid_matrix[highest_target, highest_reference]),
     )
 
     matches: list[SentenceMatch] = []
@@ -147,7 +175,9 @@ def analyze_document(
         row = hybrid_matrix[i]
         best_j = int(row.argmax()) if row.size else -1
         best_score = float(row[best_j]) if best_j >= 0 else 0.0
+        
         best_source, best_sentence = ref_sentence_records[best_j] if best_j >= 0 else ("-", "-")
+        
         tfidf_score = float(tfidf_overlap_matrix[i, best_j]) if best_j >= 0 else 0.0
         cosine_score = float(cosine_matrix[i, best_j]) if best_j >= 0 else 0.0
         semantic_score = float(semantic_matrix[i, best_j]) if semantic_matrix is not None and best_j >= 0 else 0.0
@@ -169,15 +199,27 @@ def analyze_document(
                 cosine_score=round(cosine_score * 100, 1),
                 semantic_score=round(semantic_score * 100, 1),
                 hybrid_score=round(best_score * 100, 1),
+                start_offset=sentence_offsets[i][0],
+                end_offset=sentence_offsets[i][1],
             )
         )
 
     # Overall score blends: proportion of flagged sentences + mean similarity,
     # weighted so a handful of near-identical sentences move the needle like
     # a real similarity-report tool (e.g. Turnitin-style overall index).
-    flagged_ratio = flagged_count / len(target_sentences)
-    mean_sim = score_accum / len(target_sentences)
-    overall = round(min(100.0, (0.40 * flagged_ratio + 0.60 * mean_sim) * 100), 1)
+    mean_similarity = score_accum / len(target_sentences)
+    flagged_percentage = flagged_count / len(target_sentences)
+
+    overall = round(
+        min(
+            100.0,
+            (
+               mean_similarity * 0.90 +
+               flagged_percentage * 0.10
+            ) * 100
+        ),
+        1,
+   )
 
     return SimilarityReport(
         overall_score=overall,
@@ -187,3 +229,28 @@ def analyze_document(
         semantic_enabled=ENABLE_SEMANTIC_SIMILARITY,
         semantic_available=semantic_matrix is not None,
     )
+
+
+def _sentence_offsets(source_text: str, sentences: list[str]) -> list[tuple[int, int]]:
+    """Map normalized analysis sentences back to exact extracted-text spans.
+
+    Whitespace is allowed to differ because PDF and DOCX extraction can insert
+    line breaks inside a sentence.  Each search starts after the preceding
+    match, so duplicate sentences always retain their individual occurrence.
+    """
+    offsets: list[tuple[int, int]] = []
+    cursor = 0
+    for sentence in sentences:
+        parts = [part for part in sentence.split() if part]
+        pattern = r"\s+".join(re.escape(part) for part in parts)
+        match = re.search(pattern, source_text[cursor:], re.DOTALL)
+        if not match:
+            # This is defensive for unusual extraction artifacts; valid offsets
+            # are still required before a correction can be applied.
+            offsets.append((cursor, cursor))
+            continue
+        start = cursor + match.start()
+        end = cursor + match.end()
+        offsets.append((start, end))
+        cursor = end
+    return offsets

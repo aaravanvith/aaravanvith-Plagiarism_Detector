@@ -76,7 +76,7 @@ def add_document(
         reference_count=len(re.findall(r"\b(references|bibliography)\b", raw_text, re.IGNORECASE)),
         ai_score=ai_score,
         similarity_score=similarity_score,
-        approval_status="pending",
+        approval_status="approved",
     )
     db.add(document)
     db.flush()

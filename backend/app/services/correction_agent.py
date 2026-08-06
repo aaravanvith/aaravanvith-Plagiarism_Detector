@@ -312,24 +312,13 @@ def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, 
                 strength,
                 f"{rewrites['human']} Previous Simple attempt was too similar; use a new sentence pattern.",
             )
-        if (
-            generator
-            and mode == "simple"
-            and candidate
-            and _textual_similarity(candidate, rewrites["human"]) > 0.60
-        ):
-            raise RewriteProviderConfigurationError(
-                f"{provider} returned a Simple rewrite over the 60% Human similarity limit."
-            )
-        if generator and not candidate:
-            raise RewriteProviderConfigurationError(
-                f"{provider} returned no valid {mode} rewrite; offline fallback was not used."
-            )
-        if generator and any(_too_similar(candidate, prior) for prior in rewrites.values()):
-            raise RewriteProviderConfigurationError(
-                f"{provider} returned a {mode} rewrite too similar to another mode; offline fallback was not used."
-            )
-        if not generator:
+        # Ollama is optional. A stopped server, unavailable model, or weak
+        # response must not turn the Correction Agent into an HTTP 503.
+        if candidate and mode == "simple" and _textual_similarity(candidate, rewrites["human"]) > 0.60:
+            candidate = None
+        if candidate and any(_too_similar(candidate, prior) for prior in rewrites.values()):
+            candidate = None
+        if not candidate:
             candidate = _best_offline_rewrite(sentence, mode, strength, list(rewrites.values()))
         rewrites[mode] = candidate
     return rewrites

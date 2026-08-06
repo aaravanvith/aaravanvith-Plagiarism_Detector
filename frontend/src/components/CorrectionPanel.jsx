@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Sparkles, MessageCircle, Send, X, Quote } from "lucide-react";
 import { correctSentence, sendChat } from "../api";
 
-export default function CorrectionPanel({ sentence, onClose }) {
+export default function CorrectionPanel({ sentence, onClose, onApply, isApplied }) {
   const [correction, setCorrection] = useState(null);
   const [rewriteMode, setRewriteMode] = useState("academic");
   const [rewriteStrength, setRewriteStrength] = useState("moderate");
@@ -18,7 +18,7 @@ export default function CorrectionPanel({ sentence, onClose }) {
     setMessages([]);
     setRewriteMode("academic");
     setRequestError("");
-    correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity, rewriteStrength)
+    correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity, rewriteStrength, sentence.start_offset, sentence.end_offset)
       .then((res) => {
         setCorrection(res);
         setMessages([
@@ -114,6 +114,18 @@ export default function CorrectionPanel({ sentence, onClose }) {
               <p className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
                 {correction.rewrites?.[rewriteMode] || correction.rewritten}
               </p>
+              <button
+                type="button"
+                onClick={() => onApply({
+                  original: correction.original,
+                  corrected: correction.rewrites?.[rewriteMode] || correction.rewritten,
+                  start_offset: correction.start_offset,
+                  end_offset: correction.end_offset,
+                })}
+                className="mt-2 w-full rounded-md bg-seal-500 px-3 py-2 text-sm font-medium text-white hover:bg-seal-600"
+              >
+                {isApplied ? "Update applied correction" : "Apply"}
+              </button>
             </Section>
 
             <Section title="Citation guidance" icon={<Quote className="h-3.5 w-3.5" />}>
