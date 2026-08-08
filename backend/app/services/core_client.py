@@ -57,8 +57,11 @@ def search_works(query: str, limit: int = 5) -> list[CoreWork]:
     if not query.strip():
         raise CoreRequestError("A CORE search query is required")
 
+    print(">>> CORE SEARCH QUERY:", query)
+    print(">>> CORE SEARCH LIMIT:", limit)
+
     _rate_limit()
-    params = urlencode({"q": query.strip(), "limit": min(max(limit, 1), 10)})
+    params = urlencode({"q": query.strip(), "limit": min(max(limit, 1), 20)})
     request = Request(
         f"{CORE_API_URL}?{params}",
         headers={
@@ -69,7 +72,12 @@ def search_works(query: str, limit: int = 5) -> list[CoreWork]:
     )
     try:
         with urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            raw_response = response.read().decode("utf-8")
+
+            print(">>> CORE HTTP STATUS:", response.status)
+            print(">>> CORE RESPONSE:", raw_response[:2000])
+
+            payload = json.loads(raw_response)
     except HTTPError as exc:
         if exc.code == 401:
             raise CoreRequestError("CORE rejected the configured API key. Generate a new key and update backend/.env.") from exc

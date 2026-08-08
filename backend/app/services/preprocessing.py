@@ -23,31 +23,47 @@ _WORD_RE = re.compile(r"[A-Za-z']+")
 
 
 def clean_text(text: str) -> str:
-    """Normalize whitespace, strip control chars, fix common PDF artifacts."""
-    text = text.replace("\x0c", " ").replace("\u000b", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{2,}", "\n", text)
-    # de-hyphenate line-wrapped words e.g. "inter-\nnet" -> "internet"
+    """Normalize text while preserving paragraph boundaries."""
+    text = text.replace("\x0c", "\n").replace("\u000b", "\n")
+
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
-    text = text.replace("\n", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]*\n+", "\n\n", text)
+    text = "\n".join(line.strip() for line in text.splitlines())
+
     return text.strip()
+    
 
 
 def split_sentences(text: str) -> list[str]:
-    """Lightweight rule-based sentence splitter (no punkt download required)."""
+    """Split text into sentences without merging paragraph boundaries."""
     text = clean_text(text)
+
     if not text:
         return []
-    raw = _SENT_SPLIT_RE.split(text)
-    sentences = [s.strip() for s in raw if len(s.strip()) > 0]
-    # merge very short fragments (< 4 words) into the previous sentence
-    merged: list[str] = []
-    for s in sentences:
-        if merged and len(s.split()) < 4:
-            merged[-1] = merged[-1] + " " + s
-        else:
-            merged.append(s)
-    return merged
+
+    sentences: list[str] = []
+
+    for paragraph in re.split(r"\n\s*\n", text):
+        paragraph = paragraph.strip()
+
+        if not paragraph:
+            continue
+
+        raw = _SENT_SPLIT_RE.split(paragraph)
+
+        for sentence in raw:
+            sentence = sentence.strip()
+
+            if not sentence:
+                continue
+
+            if sentences and len(sentence.split()) < 4:
+                sentences[-1] += " " + sentence
+            else:
+                sentences.append(sentence)
+
+    return sentences
 
 
 def tokenize(text: str) -> list[str]:

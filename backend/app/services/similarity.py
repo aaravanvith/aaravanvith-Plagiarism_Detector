@@ -27,6 +27,7 @@ from ..settings import ENABLE_SEMANTIC_SIMILARITY
 FLAG_THRESHOLD = 0.30  # cosine similarity above this -> sentence flagged
 HIGH_RISK_THRESHOLD = 0.75
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -117,6 +118,7 @@ def analyze_document(
         ngram_range=(1, 2),
         min_df=1,
         sublinear_tf=True,
+        norm=None
     )
     tfidf_matrix = vectorizer.fit_transform(corpus_texts)
     logger.info("TF-IDF: vocabulary=%d, matrix=%s", len(vectorizer.vocabulary_), tfidf_matrix.shape)
@@ -130,18 +132,71 @@ def analyze_document(
     # This weighted TF-IDF overlap is distinct from cosine normalization: it
     # captures how much of a target sentence's TF-IDF signal appears in a
     # source sentence. Together with cosine and SBERT it forms the hybrid score.
-    tfidf_overlap_matrix = target_vecs.dot(ref_vecs.T).toarray()
-    tfidf_overlap_matrix = np.minimum(cosine_matrix, tfidf_overlap_matrix)  
-    logger.info("TF-IDF overlap distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(tfidf_overlap_matrix)), float(np.percentile(tfidf_overlap_matrix, 95)), float(tfidf_overlap_matrix.max()))
-    logger.info("Cosine distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(cosine_matrix)), float(np.percentile(cosine_matrix, 95)), float(cosine_matrix.max()))
+    # True directional TF-IDF overlap.
+    # Measures how much of the target sentence's TF-IDF weight
+    # is covered by the reference sentence.
+    target_tfidf = target_vecs.toarray()
+    reference_tfidf = ref_vecs.toarray()
+
+    target_norm = target_tfidf.sum(axis=1, keepdims=True)
+    target_norm[target_norm == 0] = 1.0
+
+    tfidf_overlap_matrix = np.zeros(
+        (n_target, len(ref_sentence_records)),
+        dtype=np.float32,
+    )
+
+    for i in range(n_target):
+        target_weights = target_tfidf[i]
+
+        for j in range(len(ref_sentence_records)):
+            reference_weights = reference_tfidf[j]
+
+            overlap = np.minimum(
+                target_weights,
+                reference_weights,
+            ).sum()
+
+            tfidf_overlap_matrix[i, j] = overlap / target_norm[i, 0]
+
+    print(
+        "TF-IDF overlap: median=%.4f p95=%.4f max=%.4f"
+        % (
+            float(np.median(tfidf_overlap_matrix)),
+            float(np.percentile(tfidf_overlap_matrix, 95)),
+            float(tfidf_overlap_matrix.max()),
+          )
+    )
+
+    print(
+        "Cosine: median=%.4f p95=%.4f max=%.4f"
+        % (
+            float(np.median(cosine_matrix)),
+            float(np.percentile(cosine_matrix, 95)),
+            float(cosine_matrix.max()),
+          )
+   )
+   
 
     semantic_matrix = (
-        semantic_similarity_matrix(target_sentences, [s for _, s in ref_sentence_records])
+        semantic_similarity_matrix(
+            target_sentences,
+            [s for _, s in ref_sentence_records]
+        )
         if ENABLE_SEMANTIC_SIMILARITY
         else None
     )
+
     if semantic_matrix is not None:
-        logger.info("SBERT distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(semantic_matrix)), float(np.percentile(semantic_matrix, 95)), float(semantic_matrix.max()))
+        print(
+            "SBERT: median=%.4f p95=%.4f max=%.4f"
+            % (
+                float(np.median(semantic_matrix)),
+                float(np.percentile(semantic_matrix, 95)),
+                float(semantic_matrix.max()),
+            )
+        )
+
     # When the optional model is disabled/unavailable, preserve the existing
     # lexical cosine result exactly as the fallback score.
     hybrid_matrix = (
@@ -155,17 +210,36 @@ def analyze_document(
             0.5 * tfidf_overlap_matrix +
             0.5 * cosine_matrix
         )
-   )
-    logger.info("Hybrid distribution: median=%.4f p95=%.4f max=%.4f", float(np.median(hybrid_matrix)), float(np.percentile(hybrid_matrix, 95)), float(hybrid_matrix.max()))
-    highest_target, highest_reference = np.unravel_index(int(hybrid_matrix.argmax()), hybrid_matrix.shape)
-    logger.info(
-        "Highest sentence pair: source=%s tfidf_overlap=%.4f cosine=%.4f sbert=%s hybrid=%.4f",
-        ref_sentence_records[highest_reference][0],
-        float(tfidf_overlap_matrix[highest_target, highest_reference]),
-        float(cosine_matrix[highest_target, highest_reference]),
-        f"{semantic_matrix[highest_target, highest_reference]:.4f}" if semantic_matrix is not None else "disabled",
-        float(hybrid_matrix[highest_target, highest_reference]),
     )
+
+    print(
+        "HYBRID: median=%.4f p95=%.4f max=%.4f"
+        % (
+            float(np.median(hybrid_matrix)),
+            float(np.percentile(hybrid_matrix, 95)),
+            float(hybrid_matrix.max()),
+        )
+    )
+
+    highest_target, highest_reference = np.unravel_index(
+        int(hybrid_matrix.argmax()),
+        hybrid_matrix.shape,
+    )
+
+    print(
+        "HIGHEST PAIR: source=%s tfidf=%.4f cosine=%.4f sbert=%s hybrid=%.4f"
+        % (
+            ref_sentence_records[highest_reference][0],
+            float(tfidf_overlap_matrix[highest_target, highest_reference]),
+            float(cosine_matrix[highest_target, highest_reference]),
+            (
+                "%.4f" % semantic_matrix[highest_target, highest_reference]
+                if semantic_matrix is not None
+                else "disabled"
+            ),
+            float(hybrid_matrix[highest_target, highest_reference]),
+        )
+   )
 
     matches: list[SentenceMatch] = []
     flagged_count = 0
@@ -175,16 +249,44 @@ def analyze_document(
         row = hybrid_matrix[i]
         best_j = int(row.argmax()) if row.size else -1
         best_score = float(row[best_j]) if best_j >= 0 else 0.0
-        
-        best_source, best_sentence = ref_sentence_records[best_j] if best_j >= 0 else ("-", "-")
-        
-        tfidf_score = float(tfidf_overlap_matrix[i, best_j]) if best_j >= 0 else 0.0
-        cosine_score = float(cosine_matrix[i, best_j]) if best_j >= 0 else 0.0
-        semantic_score = float(semantic_matrix[i, best_j]) if semantic_matrix is not None and best_j >= 0 else 0.0
+
+        print(
+            f"SENTENCE {i + 1}: "
+            f"hybrid={best_score:.4f} "
+            f"tfidf={float(tfidf_overlap_matrix[i, best_j]):.4f} "
+            f"cosine={float(cosine_matrix[i, best_j]):.4f} "
+            f"sbert={float(semantic_matrix[i, best_j]) if semantic_matrix is not None else 0.0:.4f}"
+   )
+  
+        best_source, best_sentence = (
+            ref_sentence_records[best_j]
+            if best_j >= 0
+            else ("-", "-")
+        )
+
+        tfidf_score = (
+            float(tfidf_overlap_matrix[i, best_j])
+            if best_j >= 0
+            else 0.0
+        )
+
+        cosine_score = (
+            float(cosine_matrix[i, best_j])
+            if best_j >= 0
+            else 0.0
+        )
+
+        semantic_score = (
+            float(semantic_matrix[i, best_j])
+            if semantic_matrix is not None and best_j >= 0
+            else 0.0
+        )
 
         flagged = best_score >= FLAG_THRESHOLD
+
         if flagged:
             flagged_count += 1
+
         score_accum += best_score
 
         matches.append(
@@ -204,20 +306,28 @@ def analyze_document(
             )
         )
 
-    # Overall score blends: proportion of flagged sentences + mean similarity,
-    # weighted so a handful of near-identical sentences move the needle like
-    # a real similarity-report tool (e.g. Turnitin-style overall index).
-    mean_similarity = score_accum / len(target_sentences)
-    flagged_percentage = flagged_count / len(target_sentences)
+    # Overall plagiarism/similarity score:
+    # Consider the similarity of all sentences, while giving
+    # additional weight to sentences that cross the plagiarism threshold.
+
+    mean_similarity = (
+        sum(match.hybrid_score / 100.0 for match in matches)
+        / len(matches)
+        if matches
+        else 0.0
+    )
+
+    flagged_percentage = (
+        flagged_count / len(target_sentences)
+        if target_sentences
+        else 0.0
+    )
 
     overall = round(
-        min(
-            100.0,
-            (
-               mean_similarity * 0.90 +
-               flagged_percentage * 0.10
-            ) * 100
-        ),
+        (
+            mean_similarity * 0.90
+            + flagged_percentage * 0.10
+        ) * 100,
         1,
    )
 

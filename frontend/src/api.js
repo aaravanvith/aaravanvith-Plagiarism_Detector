@@ -12,12 +12,18 @@ async function handle(res) {
   return res.json();
 }
 
-export async function analyzeReport(file, studentName, usn) {
+export async function analyzeReport(file, studentName, usn, online = false) {
   const form = new FormData();
   form.append("file", file);
   form.append("student_name", studentName || "");
   form.append("usn", usn || "");
-  const res = await fetch(`${BASE_URL}/api/analyze`, { method: "POST", body: form });
+  form.append("online", online ? "true" : "false");
+
+  const res = await fetch(`${BASE_URL}/api/analyze`, {
+    method: "POST",
+    body: form,
+  });
+
   return handle(res);
 }
 

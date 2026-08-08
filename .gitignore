@@ -27,3 +27,4 @@ backend/data/*.joblib
 backend/data/models/
 backend/data/uploads/
 backend/data/backups/
+*.zip

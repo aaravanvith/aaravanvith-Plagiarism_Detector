@@ -2,6 +2,7 @@ from pathlib import Path
 import logging
 import shutil
 import threading
+import re
 from time import perf_counter
 
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Form, BackgroundTasks
@@ -125,6 +126,116 @@ def load_reference_corpus(db: Session, current_filename: str = "") -> dict[str, 
 
     return corpus
 
+def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
+    """
+    Fetch additional academic documents from CORE for the current analysis.
+
+    The online documents are temporary and are used only for this analysis.
+    """
+
+    words = re.findall(r"[A-Za-z]{4,}", text.lower())
+
+    stop_words = {
+        "this", "that", "with", "from", "which", "their",
+        "have", "been", "were", "will", "using", "used",
+        "into", "about", "these", "those", "there", "also",
+        "than", "then", "they", "them", "such", "more",
+        "other", "only", "each", "where", "when", "what",
+        "healthcare", "medical", "research", "study",
+        "report", "abstract", "presents", "system",
+        "project", "paper", "based", "results",
+        "method", "methods", "data", "analysis",
+    }
+
+    # Count meaningful words instead of simply taking the first 10 words.
+    frequencies = {}
+
+    for word in words:
+        if word in stop_words:
+            continue
+
+        frequencies[word] = frequencies.get(word, 0) + 1
+
+    # Select the most frequent meaningful terms.
+    keywords = [
+        word
+        for word, _count in sorted(
+            frequencies.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:5]
+    ]
+
+    # Add domain-specific terms when detected.
+    domain_terms = []
+
+    healthcare_terms = [
+        "patient",
+        "monitoring",
+        "health",
+        "hospital",
+        "clinical",
+        "diagnosis",
+        "treatment",
+        "disease",
+        "healthcare",
+        "medical",
+    ]
+
+    for term in healthcare_terms:
+        if term in words and term not in keywords:
+            domain_terms.append(term)
+
+    keywords = (keywords + domain_terms)[:6]
+
+    if not keywords:
+        logger.warning("Online mode: could not create a search query.")
+        return {}
+
+    # Use a short academic query rather than an entire sentence.
+    query = " ".join(keywords)
+
+    print(">>> CORE SEARCH QUERY:", query)
+    print(">>> CORE SEARCH LIMIT:", limit)
+
+    try:
+        works = search_works(query, limit)
+        print(">>> CORE WORKS RETURNED:", len(works))
+    except CoreConfigurationError as exc:
+        logger.warning("CORE is not configured: %s", exc)
+        return {}
+    except CoreRequestError as exc:
+        logger.warning("CORE online search failed: %s", exc)
+        return {}
+
+    online_corpus: dict[str, str] = {}
+
+    print(">>> BUILDING ONLINE CORPUS")
+
+    for index, work in enumerate(works, start=1):
+        if not work.text or len(work.text.split()) < 20:
+            continue
+
+        # Prevent very large CORE full-text documents from making
+        # the TF-IDF matrix excessively large.
+        work_text = work.text[:20000]
+
+        title = work.title or f"CORE Online Paper {index}"
+
+        if work.doi:
+            source_name = f"online::CORE::{work.doi}"
+        else:
+            source_name = f"online::CORE::{index}::{title[:60]}"
+
+        online_corpus[source_name] = work_text
+
+    logger.info(
+        "ONLINE SEARCH: retrieved %d usable documents",
+        len(online_corpus),
+    )
+
+    return online_corpus
+
     
     
 
@@ -139,9 +250,13 @@ async def analyze(
     file: UploadFile = File(...),
     student_name: str = Form(""),
     usn: str = Form(""),
+    online: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     analysis_started = perf_counter()
+
+    print(">>> ONLINE FLAG RECEIVED BY BACKEND:", online)
+    
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file uploaded")
@@ -163,10 +278,39 @@ async def analyze(
     )
 
     corpus_started = perf_counter()
-    corpus = load_reference_corpus(db, file.filename)
-    logger.info("Corpus loading completed in %.3fs", perf_counter() - corpus_started)
-    # The analyzer's normalization is unchanged, but its sentence offsets must
-    # refer to the exact text extracted from this uploaded file.
+
+    local_corpus = load_reference_corpus(db, file.filename)
+
+    if online:
+        online_corpus = build_online_corpus(text, limit=5)
+
+        corpus = {
+            **local_corpus,
+            **online_corpus,
+        }
+
+        logger.info(
+            "ONLINE ANALYSIS: local=%d + online=%d = total=%d",
+            len(local_corpus),
+            len(online_corpus),
+            len(corpus),
+        )
+    else:
+        online_corpus = {}
+        corpus = local_corpus
+
+        logger.info(
+            "OFFLINE ANALYSIS: local=%d + online=0 = total=%d",
+            len(local_corpus),
+            len(corpus),
+        )
+
+    logger.info(
+        "Corpus loading completed in %.3fs",
+        perf_counter() - corpus_started,
+    )
+
+
     sim_report = analyze_document(raw_text, corpus)
     ai_report = detect_ai_content(text)
 
@@ -209,6 +353,9 @@ async def analyze(
         "verdict": sim_report.verdict,
         "total_sources_compared": len(sim_report.sources_used),
         "sources_compared": sim_report.sources_used[:10],
+        "analysis_mode": "online" if online else "offline",
+        "local_sources_compared": len(local_corpus),
+        "online_sources_compared": len(online_corpus),
         "total_sentences": len(sim_report.sentence_matches),
         "flagged_sentence_count": len(flagged),
         "ai_detection": ai_report,

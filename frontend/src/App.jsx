@@ -23,11 +23,13 @@ export default function App() {
   const [autoCorrectError, setAutoCorrectError] = useState("");
   const [autoCorrectSummary, setAutoCorrectSummary] = useState(null);
 
-  const handleAnalyze = async (file, studentName, usn) => {
+  const handleAnalyze = async (file, studentName, usn, online) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await analyzeReport(file, studentName, usn);
+      console.log("ANALYSIS MODE FROM APP:", online);
+      
+      const res = await analyzeReport(file, studentName, usn, online);
       setResult(res);
       setUploadedFile(file);
       setAppliedCorrections([]);
