@@ -126,11 +126,17 @@ def load_reference_corpus(db: Session, current_filename: str = "") -> dict[str, 
 
     return corpus
 
-def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
+def build_online_corpus(text: str) -> dict[str, str]:
     """
-    Fetch additional academic documents from CORE for the current analysis.
+    Dynamically retrieve relevant academic documents from CORE.
 
-    The online documents are temporary and are used only for this analysis.
+    CORE results are fetched page-by-page. There is no fixed total-paper
+    limit such as 5 or 20.
+
+    A lightweight relevance check is applied before a CORE document is
+    added to the expensive TF-IDF/SBERT analysis. If two consecutive
+    CORE
+    pages contain no relevant usable documents, retrieval stops early.
     """
 
     words = re.findall(r"[A-Za-z]{4,}", text.lower())
@@ -147,7 +153,6 @@ def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
         "method", "methods", "data", "analysis",
     }
 
-    # Count meaningful words instead of simply taking the first 10 words.
     frequencies = {}
 
     for word in words:
@@ -156,7 +161,6 @@ def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
 
         frequencies[word] = frequencies.get(word, 0) + 1
 
-    # Select the most frequent meaningful terms.
     keywords = [
         word
         for word, _count in sorted(
@@ -165,9 +169,6 @@ def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
             reverse=True,
         )[:5]
     ]
-
-    # Add domain-specific terms when detected.
-    domain_terms = []
 
     healthcare_terms = [
         "patient",
@@ -184,60 +185,253 @@ def build_online_corpus(text: str, limit: int = 20) -> dict[str, str]:
 
     for term in healthcare_terms:
         if term in words and term not in keywords:
-            domain_terms.append(term)
+            keywords.append(term)
 
-    keywords = (keywords + domain_terms)[:6]
+    keywords = keywords[:6]
 
     if not keywords:
-        logger.warning("Online mode: could not create a search query.")
+        logger.warning(
+            "Online mode: could not create a search query."
+        )
         return {}
 
-    # Use a short academic query rather than an entire sentence.
     query = " ".join(keywords)
 
     print(">>> CORE SEARCH QUERY:", query)
-    print(">>> CORE SEARCH LIMIT:", limit)
-
-    try:
-        works = search_works(query, limit)
-        print(">>> CORE WORKS RETURNED:", len(works))
-    except CoreConfigurationError as exc:
-        logger.warning("CORE is not configured: %s", exc)
-        return {}
-    except CoreRequestError as exc:
-        logger.warning("CORE online search failed: %s", exc)
-        return {}
 
     online_corpus: dict[str, str] = {}
 
-    print(">>> BUILDING ONLINE CORPUS")
+    print(">>> BUILDING RELEVANCE-FILTERED ONLINE CORPUS")
 
-    for index, work in enumerate(works, start=1):
-        if not work.text or len(work.text.split()) < 20:
-            continue
+    page_size = 10
+    offset = 0
+    total_hits = None
+    page_number = 1
 
-        # Prevent very large CORE full-text documents from making
-        # the TF-IDF matrix excessively large.
-        work_text = work.text[:20000]
+    # If two consecutive pages contain no relevant papers,
+    # additional CORE results are unlikely to be useful for this report.
+    consecutive_empty_pages = 0
+    max_consecutive_empty_pages = 2
 
-        title = work.title or f"CORE Online Paper {index}"
+    # Minimum fraction of query keywords that should appear in
+    # the title/abstract/available text for a document to be considered
+    # relevant enough for the expensive ML comparison.
+    relevance_threshold = 0.34
 
-        if work.doi:
-            source_name = f"online::CORE::{work.doi}"
+    while True:
+
+        try:
+            print(
+                f">>> CORE PAGE {page_number}: "
+                f"offset={offset}, page_size={page_size}"
+            )
+
+            works, current_total_hits = search_works(
+                query,
+                limit=page_size,
+                offset=offset,
+            )
+
+            if total_hits is None:
+                total_hits = current_total_hits
+                print(
+                    ">>> CORE TOTAL HITS:",
+                    total_hits,
+                )
+
+            print(
+                f">>> CORE PAGE {page_number} RETURNED: "
+                f"{len(works)} papers"
+            )
+
+        except CoreConfigurationError as exc:
+            logger.warning(
+                "CORE is not configured: %s",
+                exc,
+            )
+            break
+
+        except CoreRequestError as exc:
+            logger.warning(
+                "CORE page failed at offset %d: %s",
+                offset,
+                exc,
+            )
+
+            # Retry the failed page with a smaller request.
+            if page_size == 10:
+
+                retry_page_size = 5
+
+                print(
+                    f">>> RETRYING CORE PAGE {page_number} "
+                    f"WITH {retry_page_size} PAPERS"
+                )
+
+                try:
+                    works, current_total_hits = search_works(
+                        query,
+                        limit=retry_page_size,
+                        offset=offset,
+                    )
+
+                    if total_hits is None:
+                        total_hits = current_total_hits
+                        print(
+                            ">>> CORE TOTAL HITS:",
+                            total_hits,
+                        )
+
+                    print(
+                        f">>> CORE RETRY PAGE {page_number} "
+                        f"RETURNED: {len(works)} papers"
+                    )
+
+                except CoreConfigurationError as retry_exc:
+                    logger.warning(
+                        "CORE is not configured during retry: %s",
+                        retry_exc,
+                    )
+                    break
+
+                except CoreRequestError as retry_exc:
+                    logger.warning(
+                        "CORE retry failed at offset %d: %s",
+                        offset,
+                        retry_exc,
+                    )
+                    break
+
+            else:
+                break
+
+        if not works:
+            print(
+                ">>> CORE returned no more papers."
+            )
+            break
+
+        relevant_on_page = 0
+
+        for index, work in enumerate(
+            works,
+            start=1,
+        ):
+
+            if not work.text:
+                continue
+
+            if len(work.text.split()) < 20:
+                continue
+
+            # Use title + the beginning of the document for the
+            # lightweight relevance check. This avoids scanning
+            # enormous full-text documents just to determine relevance.
+            preview_text = (
+                f"{work.title or ''}\n"
+                f"{work.text[:5000]}"
+            ).lower()
+
+            matched_keywords = sum(
+                1
+                for keyword in keywords
+                if keyword.lower() in preview_text
+            )
+
+            relevance_score = (
+                matched_keywords / len(keywords)
+                if keywords
+                else 0.0
+            )
+
+            print(
+                f">>> CORE PAPER: "
+                f"relevance={relevance_score:.2f} "
+                f"title={work.title[:80] if work.title else 'Untitled'}"
+            )
+
+            if relevance_score < relevance_threshold:
+                continue
+
+            relevant_on_page += 1
+
+            # Limit individual document size so one very large
+            # CORE paper does not make the ML matrix unnecessarily large.
+            work_text = work.text[:20000]
+
+            title = (
+                work.title
+                or f"CORE Online Paper {offset + index}"
+            )
+
+            if work.doi:
+                source_name = (
+                    f"online::CORE::{work.doi}"
+                )
+            else:
+                source_name = (
+                    f"online::CORE::{offset + index}::{title[:60]}"
+                )
+
+            if source_name not in online_corpus:
+                online_corpus[source_name] = work_text
+
+        print(
+            f">>> CORE PAGE {page_number}: "
+            f"{relevant_on_page} relevant papers kept"
+        )
+
+        if relevant_on_page == 0:
+            consecutive_empty_pages += 1
+
+            print(
+                f">>> NO RELEVANT PAPERS ON THIS PAGE "
+                f"({consecutive_empty_pages}/"
+                f"{max_consecutive_empty_pages})"
+            )
         else:
-            source_name = f"online::CORE::{index}::{title[:60]}"
+            consecutive_empty_pages = 0
 
-        online_corpus[source_name] = work_text
+        if (
+            consecutive_empty_pages
+            >= max_consecutive_empty_pages
+        ):
+            print(
+                ">>> CORE: stopping because consecutive pages "
+                "contain no relevant papers."
+            )
+            break
+
+        offset += len(works)
+        page_number += 1
+
+        if (
+            total_hits is not None
+            and offset >= total_hits
+        ):
+            print(
+                ">>> CORE: all available results retrieved."
+            )
+            break
+
+        if len(works) < page_size:
+            print(
+                ">>> CORE returned a partial final page."
+            )
+            break
+
+    print(
+        ">>> CORE ONLINE DOCUMENTS USED:",
+        len(online_corpus),
+    )
 
     logger.info(
-        "ONLINE SEARCH: retrieved %d usable documents",
+        "ONLINE SEARCH: dynamically retrieved %d "
+        "relevant documents",
         len(online_corpus),
     )
 
     return online_corpus
-
-    
-    
 
 
 @app.get("/api/health")
@@ -282,7 +476,7 @@ async def analyze(
     local_corpus = load_reference_corpus(db, file.filename)
 
     if online:
-        online_corpus = build_online_corpus(text, limit=5)
+        online_corpus = build_online_corpus(text)
 
         corpus = {
             **local_corpus,
@@ -620,15 +814,21 @@ def import_from_core(
 ):
     """Import a small, rate-limited set of open-access CORE works locally."""
     try:
-        works = search_works(query, limit)
+        works, total_hits = search_works(
+            query,
+            limit=min(limit, 10),
+            offset=0,
+        )
     except CoreConfigurationError as exc:
         raise HTTPException(503, str(exc)) from exc
     except CoreRequestError as exc:
         raise HTTPException(502, str(exc)) from exc
 
     imported: list[dict] = []
+
     for work in works:
         text = clean_text(work.text)
+
         document = add_document(
             db,
             filename=f"core-{work.doi or work.title[:50]}.txt",
@@ -641,10 +841,18 @@ def import_from_core(
                 "project_type": "Research Paper (CORE)",
             },
         )
+
         imported.append(document_summary(document))
+
     db.commit()
     invalidate_reference_corpus_cache()
-    return {"query": query, "imported_count": len(imported), "documents": imported}
+
+    return {
+        "query": query,
+        "imported_count": len(imported),
+        "documents": imported,
+        "total_hits": total_hits,
+    }
 
 
 @app.post("/api/repository/documents/{document_id}/archive")

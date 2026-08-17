@@ -51,17 +51,32 @@ def _rate_limit() -> None:
         _last_request_at = time.monotonic()
 
 
-def search_works(query: str, limit: int = 5) -> list[CoreWork]:
+def search_works(
+    query: str,
+    limit: int = 10,
+    offset: int = 0,
+) -> tuple[list[CoreWork], int]:
+
     if not configured():
-        raise CoreConfigurationError("CORE_API_KEY is not configured on this server")
+        raise CoreConfigurationError(
+            "CORE_API_KEY is not configured on this server"
+        )
+
     if not query.strip():
         raise CoreRequestError("A CORE search query is required")
 
     print(">>> CORE SEARCH QUERY:", query)
     print(">>> CORE SEARCH LIMIT:", limit)
+    print(">>> CORE SEARCH OFFSET:", offset)
 
     _rate_limit()
-    params = urlencode({"q": query.strip(), "limit": min(max(limit, 1), 20)})
+
+    params = urlencode({
+        "q": query.strip(),
+        "limit": min(max(limit, 1), 10),
+        "offset": max(offset, 0),
+    })
+
     request = Request(
         f"{CORE_API_URL}?{params}",
         headers={
@@ -70,40 +85,96 @@ def search_works(query: str, limit: int = 5) -> list[CoreWork]:
             "User-Agent": "VTU-Plagiarism-Detector/1.0",
         },
     )
+
     try:
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=60) as response:
             raw_response = response.read().decode("utf-8")
 
             print(">>> CORE HTTP STATUS:", response.status)
             print(">>> CORE RESPONSE:", raw_response[:2000])
 
             payload = json.loads(raw_response)
+
     except HTTPError as exc:
+        error_body = ""
+
+        try:
+            error_body = exc.read().decode("utf-8")
+        except Exception:
+            pass
+
+        print(">>> CORE HTTP ERROR:", exc.code)
+        print(">>> CORE ERROR RESPONSE:", error_body[:2000])
+
         if exc.code == 401:
-            raise CoreRequestError("CORE rejected the configured API key. Generate a new key and update backend/.env.") from exc
+            raise CoreRequestError(
+                "CORE rejected the configured API key."
+            ) from exc
+
         if exc.code == 429:
-            raise CoreRequestError("CORE rate limit reached. Wait before importing more papers.") from exc
-        raise CoreRequestError(f"CORE request failed with HTTP {exc.code}") from exc
+            raise CoreRequestError(
+                "CORE rate limit reached."
+            ) from exc
+
+        raise CoreRequestError(
+            f"CORE request failed with HTTP {exc.code}"
+        ) from exc
+
     except Exception as exc:
-        raise CoreRequestError("CORE request failed; check the configured API key and network access") from exc
+        print(">>> CORE UNEXPECTED ERROR:", repr(exc))
+
+        raise CoreRequestError(
+            f"CORE request failed: {exc}"
+        ) from exc
 
     records = payload.get("results") or payload.get("data") or []
+
     works: list[CoreWork] = []
+
     for record in records:
         title = record.get("title") or "Untitled CORE record"
+
         abstract = record.get("abstract") or ""
-        full_text = record.get("fullText") or record.get("fullTextText") or ""
+
+        full_text = (
+            record.get("fullText")
+            or record.get("fullTextText")
+            or ""
+        )
+
         text = f"{title}\n\n{abstract}\n\n{full_text}".strip()
+
         if len(text.split()) < 4:
             continue
-        authors = record.get("authors") or record.get("authorsText") or ""
+
+        authors = (
+            record.get("authors")
+            or record.get("authorsText")
+            or ""
+        )
+
         if isinstance(authors, list):
-            authors = ", ".join(str(author.get("name", author)) if isinstance(author, dict) else str(author) for author in authors)
-        works.append(CoreWork(
-            title=title,
-            text=text,
-            authors=str(authors),
-            year=str(record.get("publishedDate") or record.get("yearPublished") or ""),
-            doi=str(record.get("doi") or ""),
-        ))
-    return works
+            authors = ", ".join(
+                str(author.get("name", author))
+                if isinstance(author, dict)
+                else str(author)
+                for author in authors
+            )
+
+        works.append(
+            CoreWork(
+                title=title,
+                text=text,
+                authors=str(authors),
+                year=str(
+                    record.get("publishedDate")
+                    or record.get("yearPublished")
+                    or ""
+                ),
+                doi=str(record.get("doi") or ""),
+            )
+        )
+
+    total_hits = int(payload.get("totalHits") or 0)
+
+    return works, total_hits
