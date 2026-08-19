@@ -32,7 +32,7 @@ export default function ScoreSeal({ score, verdict }) {
             {score}%
           </text>
           <text x="90" y="106" textAnchor="middle" fontSize="11" letterSpacing="1.5" fontFamily="Inter, sans-serif" fill="#5C6688">
-            SIMILARITY
+            PLAGIARISM
           </text>
         </svg>
       </div>

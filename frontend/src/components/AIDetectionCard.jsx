@@ -1,7 +1,8 @@
 import { Bot, User } from "lucide-react";
 
 export default function AIDetectionCard({ aiDetection }) {
-  const { ai_probability, label, features } = aiDetection;
+  if (!aiDetection) return null;
+  const { ai_probability = 0, label = "Not available", features = {} } = aiDetection;
   const isAI = ai_probability >= 70;
   const isMixed = ai_probability >= 40 && ai_probability < 70;
 
@@ -10,8 +11,8 @@ export default function AIDetectionCard({ aiDetection }) {
 
   return (
     <div className="bg-white rounded-xl border border-ink-100 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-display text-lg text-ink-900">AI-Generated Content Detection</h3>
+      <div className="flex items-center justify-between mb-4"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">Content authenticity</p>
+        <h3 className="font-display text-lg text-ink-900">AI Content Detection</h3></div>
         <Icon className="h-5 w-5" style={{ color }} />
       </div>
 
@@ -32,10 +33,10 @@ export default function AIDetectionCard({ aiDetection }) {
 
       <p className="text-xs text-ink-400 uppercase tracking-wide mb-2">Stylometric signals</p>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <Feature label="Avg. sentence length" value={features.avg_sentence_length} />
-        <Feature label="Sentence-length variance" value={features.sentence_length_variation} />
-        <Feature label="Lexical diversity (TTR)" value={features.lexical_diversity_ttr} />
-        <Feature label="Stopword ratio" value={features.stopword_ratio} />
+        <Feature label="Avg. sentence length" value={features.avg_sentence_length ?? "—"} />
+        <Feature label="Sentence-length variance" value={features.sentence_length_variation ?? "—"} />
+        <Feature label="Lexical diversity (TTR)" value={features.lexical_diversity_ttr ?? "—"} />
+        <Feature label="Stopword ratio" value={features.stopword_ratio ?? "—"} />
       </dl>
     </div>
   );

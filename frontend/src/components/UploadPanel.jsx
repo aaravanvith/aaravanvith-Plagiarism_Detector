@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { UploadCloud, FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2, UploadCloud, X } from "lucide-react";
 
 export default function UploadPanel({ onAnalyze, loading, error }) {
   const [file, setFile] = useState(null);
@@ -21,15 +21,14 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
   return (
     <form
       onSubmit={submit}
-      className="bg-white rounded-xl border border-ink-100 p-8"
+      className="bg-white rounded-xl border border-ink-100 p-6 shadow-[0_8px_30px_rgba(15,23,48,.04)] sm:p-8"
     >
       <h2 className="font-display text-2xl text-ink-900 mb-1">
-        Submit a report for review
+        Submit Academic Report
       </h2>
 
       <p className="text-sm text-ink-400 mb-6">
-        PDF, DOCX, or TXT. Compare against the local reference corpus
-        or expand the analysis with additional academic sources online.
+        Analyze your healthcare or engineering report for plagiarism and AI-generated content.
       </p>
 
       {/* Analysis Mode */}
@@ -50,13 +49,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
                 : "border-ink-100 hover:border-ink-300"
             }`}
           >
-            <p className="text-sm font-semibold text-ink-800">
-              Offline
-            </p>
-
-            <p className="text-xs text-ink-400 mt-1">
-              
-            </p>
+            <p className="text-sm font-semibold text-ink-800">Offline</p><p className="mt-1 text-xs text-ink-400">Local Repository</p>
           </button>
 
           {/* Online */}
@@ -69,13 +62,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
                 : "border-ink-100 hover:border-ink-300"
             }`}
           >
-            <p className="text-sm font-semibold text-ink-800">
-              Online
-            </p>
-
-            <p className="text-xs text-ink-400 mt-1">
-              
-            </p>
+            <p className="text-sm font-semibold text-ink-800">Online</p><p className="mt-1 text-xs text-ink-400">Online Academic Search</p>
           </button>
 
         </div>
@@ -123,9 +110,8 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
               {file.name}
             </p>
 
-            <p className="text-xs text-ink-400">
-              Click to choose a different file
-            </p>
+            <p className="text-xs text-ink-400">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
+            <button type="button" onClick={(event) => { event.stopPropagation(); setFile(null); if (inputRef.current) inputRef.current.value = ""; }} className="inline-flex items-center gap-1 text-xs font-medium text-risk-high hover:underline"><X className="h-3 w-3" />Remove file</button>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
@@ -192,7 +178,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
             Analyzing report…
           </>
         ) : (
-          "Run plagiarism & AI-content analysis"
+          "Run Academic Integrity Analysis"
         )}
       </button>
     </form>

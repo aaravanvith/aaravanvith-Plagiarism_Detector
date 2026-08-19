@@ -4,23 +4,23 @@ const RISK_STYLES = {
   low: "bg-transparent text-ink-600 border-transparent",
 };
 
-export default function SentenceReport({ sentences, onSelect, activeSentence }) {
+export default function SentenceReport({ sentences = [], onSelect, activeSentence }) {
   return (
     <div className="bg-white rounded-xl border border-ink-100 p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-display text-lg text-ink-900">Sentence-Level Evidence</h3>
+        <div><p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">Explainable evidence</p><h3 className="font-display text-lg text-ink-900">Sentence-Level Report</h3></div>
         <p className="text-xs text-ink-400">Click a highlighted line to inspect the hybrid score</p>
       </div>
       <div className="space-y-1 leading-relaxed">
         {sentences.map((s, i) => (
-          <p
+          <button type="button"
             key={i}
             onClick={() => s.flagged && onSelect(s)}
             className={`rounded-md px-2 py-1.5 border text-[15px] ${RISK_STYLES[s.risk]} ${
               s.flagged ? "cursor-pointer hover:brightness-95" : ""
             } ${activeSentence?.sentence === s.sentence ? "ring-2 ring-seal-500" : ""}`}
           >
-            {s.sentence}
+            <span className="mr-2 font-mono text-xs text-ink-400">{String(i + 1).padStart(2, "0")}</span>{s.sentence}
             {s.flagged && (
               <>
                 <span className="ml-2 font-mono text-xs opacity-70">{s.hybrid_similarity ?? s.similarity}%</span>
@@ -30,7 +30,7 @@ export default function SentenceReport({ sentences, onSelect, activeSentence }) 
                 </span>
               </>
             )}
-          </p>
+          </button>
         ))}
       </div>
     </div>

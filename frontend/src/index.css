@@ -9,9 +9,20 @@ html, body, #root {
 }
 
 body {
-  background: #F7F8FB;
+  background: #f4f7f8;
   font-family: 'Inter', system-ui, sans-serif;
   color: #182142;
+}
+
+* { scrollbar-color: #c7ccdf transparent; }
+button, input, select { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 3px solid rgba(23, 125, 120, .28);
+  outline-offset: 2px;
+}
+.app-grid {
+  background-image: linear-gradient(rgba(15, 23, 48, .025) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 48, .025) 1px, transparent 1px);
+  background-size: 30px 30px;
 }
 
 ::selection {
@@ -29,6 +40,6 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent, rgba(201,150,44,.35), transparent);
+  background: linear-gradient(180deg, transparent, rgba(23,125,120,.25), transparent);
   animation: sweep 2.4s ease-in-out infinite;
 }

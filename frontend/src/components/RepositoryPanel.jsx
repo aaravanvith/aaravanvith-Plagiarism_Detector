@@ -15,6 +15,8 @@ export default function RepositoryPanel() {
   const [documents, setDocuments] = useState([]);
   const [stats, setStats] = useState(null);
   const [query, setQuery] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [subjectFilter, setSubjectFilter] = useState("");
   const [metadata, setMetadata] = useState(initialMetadata);
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -24,7 +26,7 @@ export default function RepositoryPanel() {
   const inputRef = useRef(null);
 
   const load = async (q = query) => {
-    const [items, totals] = await Promise.all([listRepositoryDocuments({ q }), repositoryStats()]);
+    const [items, totals] = await Promise.all([listRepositoryDocuments({ q, department: departmentFilter, subject: subjectFilter }), repositoryStats()]);
     setDocuments(items);
     setStats(totals);
   };
@@ -83,9 +85,13 @@ export default function RepositoryPanel() {
         </form>
 
         <div className="bg-white rounded-xl border border-ink-100 p-6">
-          <div className="flex gap-2 mb-5">
+          <div className="flex gap-2 mb-3">
             <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} placeholder="Search title, keyword, student, or USN" className="flex-1 rounded-md border border-ink-100 px-3 py-2 text-sm" />
             <button onClick={() => load()} className="rounded-md border border-ink-100 px-3 text-ink-600"><Search className="h-4 w-4" /></button>
+          </div>
+          <div className="mb-5 grid gap-2 sm:grid-cols-2">
+            <input value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} placeholder="Filter by department" aria-label="Filter by department" className="rounded-md border border-ink-100 px-3 py-2 text-sm" />
+            <input value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} placeholder="Filter by subject" aria-label="Filter by subject" className="rounded-md border border-ink-100 px-3 py-2 text-sm" />
           </div>
           <div className="space-y-2">
             {documents.length === 0 ? <p className="text-sm text-ink-400 py-8 text-center">No repository documents found.</p> : documents.map((doc) => (
