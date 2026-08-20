@@ -30,6 +30,13 @@ Use the committed templates [backend/.env.example](backend/.env.example) and
 Optional: [Ollama](https://ollama.com/) for higher-quality local rewrite
 suggestions, and a CORE API key for importing academic papers.
 
+deactivate
+cd ..
+Rename-Item .\venv .\venv-py314
+py -3.10 -m venv venv
+.\venv\Scripts\Activate.ps1
+python --version
+
 ## Run after cloning
 
 Clone the repository and open its root directory:
