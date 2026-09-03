@@ -1,23 +1,23 @@
-# API and persistence
+# Web API and persistence
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 pydantic>=2.12.5,<3.0.0
 python-multipart==0.0.9
 
-# AI rewrite providers
+# HTTP clients and optional rewrite providers
 google-genai>=2.12.0
 requests==2.32.3
 
-# Local document extraction
+# Document extraction and corrected-document output
 pypdf==4.3.1
 python-docx==1.1.2
 
-# Local ML and hybrid similarity
+# Local AI detection and hybrid similarity
 scikit-learn==1.5.2
 numpy==1.26.4
 joblib==1.4.2
 sentence-transformers==3.0.1
 
-# Reference-corpus database tooling
+# Optional reference-corpus builder
 chromadb==0.5.5

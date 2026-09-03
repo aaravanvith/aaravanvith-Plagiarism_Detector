@@ -1,8 +1,10 @@
 # VTU Report Plagiarism Detector
 
-A full-stack plagiarism detector for academic reports. The frontend is React +
-Vite; the backend is FastAPI, SQLite, scikit-learn, and optional semantic
-similarity. It accepts PDF, DOCX, TXT, Markdown, and RTF documents.
+A full-stack plagiarism detector for academic reports. The React/Vite frontend
+works with a FastAPI, SQLite, scikit-learn backend and optional semantic
+similarity. It analyzes PDF, DOCX, TXT, Markdown, and RTF uploads, identifies
+matching passages, records report history, and can produce corrected copies.
+Corrected-file export supports PDF, DOCX, TXT, and Markdown uploads.
 
 ## What is included in Git
 
@@ -16,6 +18,7 @@ after cloning:
 - `backend/.env` and `frontend/.env` - local configuration and secrets
 - `backend/data/app.db` - SQLite database, created on backend startup
 - `backend/data/ai_detector.joblib` - generated AI-detection model
+- `backend/reference_corpus/chromadb/` - optional generated Chroma vector store
 - Python virtual environments, `frontend/node_modules`, build output, and logs
 
 Use the committed templates [backend/.env.example](backend/.env.example) and
@@ -121,7 +124,8 @@ when the backend runs on another host or port, then restart Vite.
   before starting the backend. TF-IDF/cosine analysis still works.
 - Sample documents in `backend/reference_corpus/` are used immediately as the
   comparison corpus. Add your own `.txt` references there and restart the
-  backend to load them.
+  backend to load them. The optional Chroma database is generated separately
+  and is not required by the web app.
 
 ## Optional services
 
@@ -166,9 +170,13 @@ not required to run the web application.
 
 - `POST /api/analyze` - analyze an uploaded report
 - `POST /api/correct` and `POST /api/auto-correct` - create/apply corrections
+- `POST /api/chat` - ask the correction assistant about an analysis
 - `GET /api/reports` - report history
+- `GET /api/reports/{report_id}` and `DELETE /api/reports/{report_id}` - view or delete a report
 - `POST /api/repository/documents` - add a reference document
-- `GET /api/repository/stats` - local repository statistics
+- `GET /api/repository/documents` and `GET /api/repository/stats` - browse local references and statistics
+- `POST /api/repository/documents/{document_id}/archive` and `/restore` - manage a reference document
+- `GET /api/repository/core/status` and `POST /api/repository/core/import` - check or import from CORE
 - `GET /api/health` - health check
 
 ## Project layout
@@ -177,7 +185,7 @@ not required to run the web application.
 backend/
   app/                 FastAPI application and analysis services
   data/                Generated SQLite database and local model (ignored)
-  reference_corpus/    Tracked starter comparison documents
+  reference_corpus/    Tracked starter comparison documents; generated Chroma data is ignored
   .env.example         Backend configuration template
   requirements.txt     Python dependencies
 frontend/

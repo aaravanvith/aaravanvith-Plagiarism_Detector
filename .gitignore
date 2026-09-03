@@ -1,8 +1,16 @@
+# JavaScript / Vite
 node_modules/
 dist/
+dist-ssr/
 .vite/
+<<<<<<< HEAD
 
 # Python virtual environments
+=======
+*.local
+
+# Python
+>>>>>>> bda24e5 (landing page)
 venv/
 venv*/
 .venv/
@@ -10,20 +18,29 @@ env/
 ENV/
 backend/.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 .coverage
 .coverage.*
+htmlcov/
+
+# Environment files and credentials (commit only documented examples)
 .env
 .env.*
 !.env.example
-
-# Provider credentials must remain local; examples may be committed safely.
-backend/.env
-frontend/.env
 !backend/.env.example
 !frontend/.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Local runtime data, model caches, and uploaded material
 backend/data/*.db
@@ -32,4 +49,27 @@ backend/data/*.joblib
 backend/data/models/
 backend/data/uploads/
 backend/data/backups/
+<<<<<<< HEAD
+=======
+backend/reference_corpus/chromadb/
+
+# Downloaded model and vector-store caches
+.cache/
+cache/
+.huggingface/
+
+# Editor and operating-system files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Archives
+>>>>>>> bda24e5 (landing page)
 *.zip
