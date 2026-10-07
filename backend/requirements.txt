@@ -21,3 +21,4 @@ sentence-transformers==3.0.1
 
 # Optional reference-corpus builder
 chromadb==0.5.5
+gunicorn
