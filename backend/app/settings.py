@@ -33,7 +33,7 @@ def env_flag(name: str, default: bool) -> bool:
     return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-ENABLE_SEMANTIC_SIMILARITY = env_flag("ENABLE_SEMANTIC_SIMILARITY", True)
+ENABLE_SEMANTIC_SIMILARITY = env_flag("ENABLE_SEMANTIC_SIMILARITY", False)
 SEMANTIC_MODEL_NAME = os.getenv("SEMANTIC_MODEL_NAME", "all-MiniLM-L6-v2")
 CORE_API_KEY = os.getenv("CORE_API_KEY", "")
 CORE_API_URL = os.getenv("CORE_API_URL", "https://api.core.ac.uk/v3/search/works/")
