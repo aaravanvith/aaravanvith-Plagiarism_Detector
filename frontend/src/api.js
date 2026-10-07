@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const BASE_URL = "https://vidya-chaya-audit.onrender.com";
 
 async function handle(res) {
   if (!res.ok) {
