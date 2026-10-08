@@ -130,7 +130,12 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
 
     # For unparseable sentences, reorganize at the sentence level rather than
     # pretending a few changed words are a paraphrase.
-    candidates.append(_sentence(f"This work addresses the following: {core[:1].lower() + core[1:]}", ending))
+    fallback_prefix = {
+        "academic": "The subject addressed in this report is",
+        "human": "This report covers",
+        "simple": "Report topic",
+    }[mode]
+    candidates.append(_sentence(f"{fallback_prefix}: {core}", ending))
 
     if mode == "human" and parsed:
         subject, verb, obj = parsed
@@ -196,7 +201,8 @@ def _best_offline_rewrite(sentence: str, mode: str, strength: str, avoid: list[s
             return min(choices, key=lambda item: SequenceMatcher(None, _tokens(sentence), _tokens(item)).ratio())
         return max(choices, key=lambda item: _candidate_score(sentence, item))
     core = _core(sentence)
-    return _sentence(f"This work addresses the following: {core[:1].lower() + core[1:]}", _ending(sentence))
+    prefix = {"academic": "The subject addressed in this report is", "human": "This report covers", "simple": "Report topic"}[mode]
+    return _sentence(f"{prefix}: {core}", _ending(sentence))
 
 
 _MODE_INSTRUCTIONS = {

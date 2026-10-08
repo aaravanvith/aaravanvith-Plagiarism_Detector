@@ -175,12 +175,13 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
         {loading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
-            Analyzing report…
+            Connecting and analyzing report…
           </>
         ) : (
           "Run Academic Integrity Analysis"
         )}
       </button>
+      {loading && <p role="status" className="mt-2 text-sm text-ink-500">The server may need up to two minutes to wake up before analysis starts.</p>}
     </form>
   );
 }

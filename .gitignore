@@ -3,14 +3,11 @@ node_modules/
 dist/
 dist-ssr/
 .vite/
-<<<<<<< HEAD
 
 # Python virtual environments
-=======
 *.local
 
 # Python
->>>>>>> bda24e5 (landing page)
 venv/
 venv*/
 .venv/
@@ -49,8 +46,6 @@ backend/data/*.joblib
 backend/data/models/
 backend/data/uploads/
 backend/data/backups/
-<<<<<<< HEAD
-=======
 backend/reference_corpus/chromadb/
 
 # Downloaded model and vector-store caches
@@ -71,5 +66,8 @@ Thumbs.db
 *.sw?
 
 # Archives
->>>>>>> bda24e5 (landing page)
 *.zip
+.semantic-deps/
+.verification-deps/
+.model-cache/
+tmp/

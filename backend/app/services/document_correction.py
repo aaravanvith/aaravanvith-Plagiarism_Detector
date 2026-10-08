@@ -9,6 +9,7 @@ from pathlib import Path
 from docx import Document
 
 from .extract import extract_text
+from .preprocessing import clean_text
 
 
 class CorrectionValidationError(ValueError):
@@ -43,7 +44,7 @@ def apply_offset_corrections(text: str, corrections: list[dict]) -> str:
         if start < 0 or end <= start or end > len(text) or not corrected.strip():
             raise CorrectionValidationError("One or more correction offsets are invalid.")
         # Extraction may contain line wrapping that was normalized for display.
-        if " ".join(text[start:end].split()) != " ".join(original.split()):
+        if " ".join(clean_text(text[start:end]).split()) != " ".join(clean_text(original).split()):
             raise CorrectionValidationError("A correction does not match the uploaded document at its offsets.")
         normalized.append((start, end, corrected))
 
@@ -186,7 +187,7 @@ def _correct_docx(content: bytes, extracted: str, corrections: list[dict], outpu
             start, end, original, replacement = _correction_values(correction)
             if start < 0 or end <= start or end > len(extracted) or not replacement.strip():
                 raise CorrectionValidationError("One or more correction offsets are invalid.")
-            if " ".join(extracted[start:end].split()) != " ".join(original.split()):
+            if " ".join(clean_text(extracted[start:end]).split()) != " ".join(clean_text(original).split()):
                 raise CorrectionValidationError("A correction does not match the uploaded document at its offsets.")
             paragraph_span = find_paragraph_range(paragraph_ranges, start, end)
             if paragraph_span is None:
@@ -236,7 +237,7 @@ def _write_text_pdf(text: str, output: Path) -> None:
             stream_lines.append("T*")
         stream_lines.append("ET")
         stream = "\n".join(stream_lines)
-        content_id = len(objects) + 2
+        content_id = len(objects) + 1
         page_id = content_id + 1
         objects.append(f"<< /Length {len(stream.encode('latin-1'))} >>\nstream\n{stream}\nendstream")
         objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents {content_id} 0 R >>")

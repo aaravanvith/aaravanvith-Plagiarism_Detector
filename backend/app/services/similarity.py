@@ -135,29 +135,7 @@ def analyze_document(
     # True directional TF-IDF overlap.
     # Measures how much of the target sentence's TF-IDF weight
     # is covered by the reference sentence.
-    target_tfidf = target_vecs.toarray()
-    reference_tfidf = ref_vecs.toarray()
-
-    target_norm = target_tfidf.sum(axis=1, keepdims=True)
-    target_norm[target_norm == 0] = 1.0
-
-    tfidf_overlap_matrix = np.zeros(
-        (n_target, len(ref_sentence_records)),
-        dtype=np.float32,
-    )
-
-    for i in range(n_target):
-        target_weights = target_tfidf[i]
-
-        for j in range(len(ref_sentence_records)):
-            reference_weights = reference_tfidf[j]
-
-            overlap = np.minimum(
-                target_weights,
-                reference_weights,
-            ).sum()
-
-            tfidf_overlap_matrix[i, j] = overlap / target_norm[i, 0]
+    tfidf_overlap_matrix = _tfidf_overlap(target_vecs, ref_vecs)
 
     print(
         "TF-IDF overlap: median=%.4f p95=%.4f max=%.4f"
@@ -341,6 +319,22 @@ def analyze_document(
     )
 
 
+def _tfidf_overlap(target_vecs, ref_vecs) -> np.ndarray:
+    """Compute the same directional overlap without dense vocabulary matrices."""
+    result = np.zeros((target_vecs.shape[0], ref_vecs.shape[0]), dtype=np.float32)
+    for i in range(target_vecs.shape[0]):
+        target = target_vecs.getrow(i)
+        total = float(target.data.sum())
+        if total == 0:
+            continue
+        # Only features present in the target can contribute to the minimum.
+        shared = ref_vecs[:, target.indices].tocoo()
+        weights = np.minimum(shared.data, target.data[shared.col])
+        result[i] = np.bincount(shared.row, weights=weights,
+                                minlength=ref_vecs.shape[0]) / total
+    return result
+
+
 def _sentence_offsets(source_text: str, sentences: list[str]) -> list[tuple[int, int]]:
     """Map normalized analysis sentences back to exact extracted-text spans.
 
@@ -352,7 +346,12 @@ def _sentence_offsets(source_text: str, sentences: list[str]) -> list[tuple[int,
     cursor = 0
     for sentence in sentences:
         parts = [part for part in sentence.split() if part]
-        pattern = r"\s+".join(re.escape(part) for part in parts)
+        # PDF extraction can split a word with a hyphen and newline; clean_text
+        # joins it for analysis, but offsets must still span the original bytes.
+        pattern = r"\s+".join(
+            r"(?:-\r?\n)?".join(re.escape(char) for char in part)
+            for part in parts
+        )
         match = re.search(pattern, source_text[cursor:], re.DOTALL)
         if not match:
             # This is defensive for unusual extraction artifacts; valid offsets

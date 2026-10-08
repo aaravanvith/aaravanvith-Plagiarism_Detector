@@ -1,4 +1,47 @@
-const BASE_URL = "https://vidya-chaya-audit.onrender.com";
+const BASE_URL = (import.meta.env.VITE_API_URL || "https://vidya-chaya-audit.onrender.com").replace(/\/+$/, "");
+let readiness = null;
+
+async function waitForBackend() {
+  if (!readiness) {
+    readiness = (async () => {
+      const deadline = Date.now() + 120000;
+      while (Date.now() < deadline) {
+        try {
+          const res = await globalThis.fetch(`${BASE_URL}/api/health`, {
+            signal: AbortSignal.timeout(10000), cache: "no-store",
+          });
+          if (res.ok && (await res.json()).status === "ok") return;
+        } catch (_) {
+          // Render can return a loading page or a network error during startup.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+      throw new Error("The backend did not start within two minutes. Please try again or check the Render service logs.");
+    })().finally(() => { readiness = null; });
+  }
+  return readiness;
+}
+
+async function fetch(url, options = {}) {
+  await waitForBackend();
+  try {
+    const res = await globalThis.fetch(url, {
+      ...options, signal: AbortSignal.timeout(180000),
+    });
+    if ([502, 503, 504].includes(res.status)) {
+      throw new Error("The backend is temporarily unavailable. Please try again after it finishes starting.");
+    }
+    return res;
+  } catch (error) {
+    if (error.name === "TimeoutError") {
+      throw new Error("The backend took too long to respond. Try a smaller report or check the Render logs.");
+    }
+    if (error instanceof TypeError) {
+      throw new Error("Unable to reach the backend. Check your connection and the Render service status.");
+    }
+    throw error;
+  }
+}
 
 async function handle(res) {
   if (!res.ok) {

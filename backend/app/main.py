@@ -7,7 +7,7 @@ from time import perf_counter
 
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -25,10 +25,22 @@ from .services.core_client import CoreConfigurationError, CoreRequestError, conf
 from .services.repository import add_document, content_hash, document_summary
 
 REFERENCE_CORPUS_DIR = Path(__file__).resolve().parent.parent / "reference_corpus"
+HEALTHCARE_CORPUS_DIR = Path(__file__).resolve().parent.parent / "healthcare_datasets" / "pubmed"
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="VTU Report Plagiarism Detector API", version="1.0.0")
 
+@app.middleware("http")
+async def report_unexpected_errors(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Unhandled API error for %s", request.url.path)
+        return JSONResponse(status_code=500, content={
+            "detail": "The backend could not complete this request. Check the Render logs for the error details."
+        })
+
+# Keep CORS outside the error middleware so browsers can read error responses.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -73,11 +85,21 @@ class ReferenceCorpusCache:
         corpus: dict[str, str] = {}
         for source_file in REFERENCE_CORPUS_DIR.glob("*.txt"):
             corpus[source_file.stem] = source_file.read_text(encoding="utf-8", errors="ignore")
+        # Bundled healthcare references must work on a fresh database too.
+        # SQLite imports are optional and may be lost when hosting restarts.
+        for source_file in sorted(HEALTHCARE_CORPUS_DIR.glob("*.txt")):
+            text = source_file.read_text(encoding="utf-8", errors="ignore").strip()
+            if text:
+                corpus[f"pubmed::{source_file.stem}"] = text
+        known_content = {content_hash(text) for text in corpus.values()}
         for document in db.query(AcademicDocument).filter(
             AcademicDocument.source_report_id.is_(None),
             AcademicDocument.is_archived.is_(False),
         ).all():
-            corpus[f"repository::{document.title or document.filename}"] = document.text
+            fingerprint = content_hash(document.text)
+            if fingerprint not in known_content:
+                corpus[f"repository::{document.title or document.filename}"] = document.text
+                known_content.add(fingerprint)
         with self._lock:
             self._corpus = corpus
         invalidate_reference_embedding_cache()
@@ -440,7 +462,7 @@ def health():
 
 
 @app.post("/api/analyze")
-async def analyze(
+def analyze(
     file: UploadFile = File(...),
     student_name: str = Form(""),
     usn: str = Form(""),
@@ -451,7 +473,7 @@ async def analyze(
 
     print(">>> ONLINE FLAG RECEIVED BY BACKEND:", online)
     
-    content = await file.read()
+    content = file.file.read()
     if not content:
         raise HTTPException(400, "Empty file uploaded")
 

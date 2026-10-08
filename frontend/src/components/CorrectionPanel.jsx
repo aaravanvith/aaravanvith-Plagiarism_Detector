@@ -14,19 +14,23 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
 
   useEffect(() => {
     if (!sentence) return;
+    let cancelled = false;
+    setCorrection(null);
     setLoading(true);
     setMessages([]);
     setRewriteMode("academic");
     setRequestError("");
     correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity, rewriteStrength, sentence.start_offset, sentence.end_offset)
       .then((res) => {
+        if (cancelled) return;
         setCorrection(res);
         setMessages([
-          { from: "agent", text: res.explanation },
+          { from: "agent", text: sentence.flagged ? res.explanation : "This sentence is below the similarity flag threshold. You can still review and apply a suggested rewrite." },
         ]);
       })
-      .catch((error) => setRequestError(error.message || "Could not load the correction agent."))
-      .finally(() => setLoading(false));
+      .catch((error) => { if (!cancelled) setRequestError(error.message || "Could not load the correction agent."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sentence, rewriteStrength]);
 
   const send = async (e) => {
@@ -50,32 +54,35 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
   if (!sentence) return null;
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-white border-l border-ink-100 shadow-2xl flex flex-col z-50">
+    <div role="dialog" aria-modal="true" aria-labelledby="correction-panel-title" className="fixed inset-y-0 right-0 w-full sm:w-[480px] bg-white border-l border-ink-100 shadow-2xl flex flex-col z-50">
       <div className="flex items-center justify-between px-5 py-4 border-b border-ink-100">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-seal-500" />
-          <h3 className="font-display text-lg text-ink-900">Correction Agent</h3>
+          <h3 id="correction-panel-title" className="font-display text-lg text-ink-900">Correction Chatbot</h3>
         </div>
-        <button onClick={onClose} className="text-ink-400 hover:text-ink-800">
+        <button type="button" aria-label="Close correction chatbot" onClick={onClose} className="text-ink-400 hover:text-ink-800">
           <X className="h-5 w-5" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
         <div className="rounded-lg bg-ink-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-ink-400 mb-1">Flagged sentence</p>
+          <p className="text-xs uppercase tracking-wide text-ink-400 mb-1">{sentence.flagged ? "Potential similarity match — review the evidence" : "Selected sentence — optional rewrite"}</p>
           <p className="text-sm text-ink-800">{sentence.sentence}</p>
           <p className="text-xs text-ink-400 mt-2">
             Matched <span className="font-mono">{sentence.matched_source}</span> ·{" "}
             <span className="font-mono">{sentence.similarity}%</span> similarity
           </p>
+          <p className="mt-3 text-xs uppercase tracking-wide text-ink-400">Matching source passage</p>
+          <p className="mt-1 text-sm text-ink-700">{sentence.matched_text || "Source passage unavailable."}</p>
+          <p className="mt-2 text-xs text-ink-500">Shared terminology alone does not establish plagiarism. Check the passage and citation before applying a rewrite.</p>
         </div>
 
-        {loading && <p className="text-sm text-ink-400">Generating explanation…</p>}
+        {loading && <p role="status" className="text-sm text-ink-400">Generating the corrected sentence…</p>}
 
         {correction && (
           <>
-            <Section title="Rewrite suggestions">
+            <Section title="Corrected sentence">
               <label className="mb-2 flex items-center justify-between gap-3 text-xs text-ink-500">
                 Rewrite strength
                 <select
@@ -111,11 +118,13 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
                   </button>
                 ))}
               </div>
-              <p className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
+              <p className="mb-1 text-xs font-semibold capitalize text-seal-600">{rewriteMode} version</p>
+              <p role="tabpanel" aria-live="polite" key={rewriteMode} className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
                 {correction.rewrites?.[rewriteMode] || correction.rewritten}
               </p>
               <button
                 type="button"
+                disabled={loading || !Number.isInteger(correction.start_offset) || correction.end_offset <= correction.start_offset}
                 onClick={() => onApply({
                   original: correction.original,
                   corrected: correction.rewrites?.[rewriteMode] || correction.rewritten,
@@ -124,7 +133,7 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
                 })}
                 className="mt-2 w-full rounded-md bg-seal-500 px-3 py-2 text-sm font-medium text-white hover:bg-seal-600"
               >
-                {isApplied ? "Update applied correction" : "Apply"}
+                {isApplied ? "Update applied correction" : "Apply corrected sentence"}
               </button>
             </Section>
 

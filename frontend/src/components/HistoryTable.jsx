@@ -11,10 +11,12 @@ const VERDICT_COLOR = {
 export default function HistoryTable() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const load = () => {
     setLoading(true);
-    listReports().then(setReports).finally(() => setLoading(false));
+    setError(null);
+    listReports().then(setReports).catch((err) => setError(err.message)).finally(() => setLoading(false));
   };
 
   useEffect(load, []);
@@ -25,6 +27,7 @@ export default function HistoryTable() {
   };
 
   if (loading) return <p className="text-sm text-ink-400">Loading submission history…</p>;
+  if (error) return <div role="alert" className="text-sm text-risk-high">{error} <button onClick={load} className="underline">Retry</button></div>;
 
   if (reports.length === 0) {
     return (
