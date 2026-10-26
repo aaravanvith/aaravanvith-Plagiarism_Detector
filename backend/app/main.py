@@ -606,6 +606,8 @@ def analyze(
                 "matched_text": m.best_source_sentence,
                 "risk": m.risk,
                 "flagged": m.flagged,
+                "ai_probability": detect_ai_content(m.sentence)["ai_probability"] if len(m.sentence.split()) >= 8 else None,
+                "ai_assessment_method": "experimental_synthetic_stylometry",
                 "tfidf_similarity": m.tfidf_score,
                 "cosine_similarity": m.cosine_score,
                 "semantic_similarity": m.semantic_score,

@@ -24,7 +24,7 @@ from .preprocessing import split_sentences, clean_text
 from .semantic_similarity import semantic_similarity_matrix
 from ..settings import ENABLE_SEMANTIC_SIMILARITY
 
-FLAG_THRESHOLD = 0.30  # cosine similarity above this -> sentence flagged
+FLAG_THRESHOLD = 0.20  # hybrid similarity at or above this -> review flag
 HIGH_RISK_THRESHOLD = 0.75
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
