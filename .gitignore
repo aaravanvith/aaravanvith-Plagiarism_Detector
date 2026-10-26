@@ -3,11 +3,9 @@ node_modules/
 dist/
 dist-ssr/
 .vite/
-
-# Python virtual environments
 *.local
 
-# Python
+# Python virtual environments
 venv/
 venv*/
 .venv/
@@ -70,4 +68,5 @@ Thumbs.db
 .semantic-deps/
 .verification-deps/
 .model-cache/
+.publish-checkout/
 tmp/

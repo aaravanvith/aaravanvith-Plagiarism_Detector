@@ -37,7 +37,7 @@ async function fetch(url, options = {}) {
       throw new Error("The backend took too long to respond. Try a smaller report or check the Render logs.");
     }
     if (error instanceof TypeError) {
-      throw new Error("Unable to reach the backend. Check your connection and the Render service status.");
+      throw new Error("Unable to reach the backend. Check your connection, verify the Render service status, or ensure the uploaded file is under 25 MB.");
     }
     throw error;
   }
