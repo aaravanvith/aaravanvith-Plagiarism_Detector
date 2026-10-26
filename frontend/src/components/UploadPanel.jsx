@@ -111,6 +111,11 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
             </p>
 
             <p className="text-xs text-ink-400">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
+            {file.size > 25 * 1024 * 1024 && (
+              <p className="mt-1 text-xs text-amber-600 bg-amber-50 px-2.5 py-1 rounded border border-amber-200 text-center max-w-sm">
+                ⚠️ Large file (&gt;25 MB). Free cloud hosting (Render/Vercel) may drop large uploads. If it fails, upload text (.txt / .docx) or run the local backend.
+              </p>
+            )}
             <button type="button" onClick={(event) => { event.stopPropagation(); setFile(null); if (inputRef.current) inputRef.current.value = ""; }} className="inline-flex items-center gap-1 text-xs font-medium text-risk-high hover:underline"><X className="h-3 w-3" />Remove file</button>
           </div>
         ) : (
