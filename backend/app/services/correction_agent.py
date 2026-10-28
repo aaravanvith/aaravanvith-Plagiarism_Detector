@@ -8,12 +8,16 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 import json
+import logging
 import os
 import re
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from . import gemini_client
 from .ollama_client import ollama_rewrite
+
+logger = logging.getLogger(__name__)
 
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#.-]*")
 _FILLER_RE = re.compile(r"^(put differently|in other words|simply put|to rephrase)\b", re.I)
@@ -221,25 +225,34 @@ _MODE_INSTRUCTIONS = {
 }
 
 
+def _clean_llm_output(text: str) -> str:
+    """Clean markdown fences, surrounding quotes, or prefix labels from LLM output."""
+    cleaned = text.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        cleaned = "\n".join(lines[1:-1]).strip()
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1].strip()
+    cleaned = re.sub(
+        r"^(?:(?:rewritten\s+)?sentence|rewrite|academic(?:\s+version)?|human(?:\s+version)?|simple(?:\s+version)?):\s*",
+        "",
+        cleaned,
+        flags=re.I,
+    ).strip()
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
 def _gemini_client():
-    """Create the official Google GenAI client once, using the loaded env key."""
-    global _GEMINI_CLIENT
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
+    """Return the initialized Gemini client via the dedicated gemini_client service."""
+    if not gemini_client.configured():
         return None
-    if genai is None:
-        raise RewriteProviderConfigurationError(
-            "GEMINI_API_KEY is configured but the google-genai package is not installed. "
-            "Install backend requirements before starting the API."
-        )
-    if _GEMINI_CLIENT is None:
-        try:
-            _GEMINI_CLIENT = genai.Client(api_key=api_key)
-        except Exception as exc:
-            raise RewriteProviderConfigurationError(
-                f"Gemini client initialization failed: {exc}"
-            ) from exc
-    return _GEMINI_CLIENT
+    try:
+        return gemini_client.get_client()
+    except Exception as exc:
+        logger.warning("Gemini client configuration failed: %s", exc)
+        return None
 
 
 def _rewrite_prompt(sentence: str, mode: str, strength: str, avoid: str = "") -> str:
@@ -258,18 +271,22 @@ def _rewrite_prompt(sentence: str, mode: str, strength: str, avoid: str = "") ->
 
 def _gemini_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") -> str | None:
     """One independent Gemini request per mode; responses are never shared."""
-    client = _gemini_client()
-    if client is None:
+    if not gemini_client.configured():
         return None
     try:
-        response = client.models.generate_content(
-            model=os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.5-flash"),
-            contents=_rewrite_prompt(sentence, mode, strength, avoid),
-        )
-        rewrite = (response.text or "").strip()
+        prompt = _rewrite_prompt(sentence, mode, strength, avoid)
+        text = gemini_client.generate_text(prompt)
+        text = _clean_llm_output(text)
+        return text if _valid_candidate(sentence, text) else None
+    except gemini_client.GeminiConfigurationError as exc:
+        logger.warning("Gemini configuration issue, falling back: %s", exc)
+        return None
+    except gemini_client.GeminiRequestError as exc:
+        logger.warning("Gemini request issue, falling back: %s", exc)
+        return None
     except Exception as exc:
-        raise RewriteProviderConfigurationError(f"Gemini rewrite request failed: {exc}") from exc
-    return rewrite if _valid_candidate(sentence, rewrite) else None
+        logger.warning("Gemini rewrite unexpected error, falling back: %s", exc)
+        return None
 
 
 def _openai_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") -> str | None:
@@ -288,45 +305,66 @@ def _openai_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") ->
     try:
         with urlopen(request, timeout=12) as response:
             rewrite = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"].strip()
+            rewrite = _clean_llm_output(rewrite)
     except (URLError, OSError, KeyError, IndexError, TypeError, json.JSONDecodeError):
         return None
     return rewrite if _valid_candidate(sentence, rewrite) else None
 
 
 def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, str]:
-    """Create independent, validated mode outputs for instant client-side tabs."""
+    """Create independent, validated mode outputs for instant client-side tabs.
+
+    Provider hierarchy:
+    1. Gemini API via official google-genai SDK
+    2. OpenAI (preserved secondary provider)
+    3. Ollama (local model fallback)
+    4. Deterministic offline structural rule-based generator
+    """
     strength = strength if strength in {"light", "moderate", "strong", "maximum"} else "moderate"
-    
-    generator = ollama_rewrite
-    provider = "Ollama"
 
     rewrites: dict[str, str] = {}
     for mode in _MODES:
         avoid = rewrites.get("human", "") if mode == "simple" else ""
-        candidate = generator(sentence, mode, strength, avoid) if generator else None
+        candidate = None
+
+        # 1. Primary provider: Gemini API
+        if gemini_client.configured():
+            candidate = _gemini_rewrite(sentence, mode, strength, avoid)
+
+        # 2. Secondary provider: OpenAI if configured
+        if not candidate and os.getenv("OPENAI_API_KEY"):
+            candidate = _openai_rewrite(sentence, mode, strength, avoid)
+
+        # 3. Tertiary provider: Local Ollama
+        if not candidate:
+            candidate = ollama_rewrite(sentence, mode, strength, avoid)
+
+        # Dedicated Simple mode similarity guard against human mode
         if (
-            generator
-            and mode == "simple"
+            mode == "simple"
             and candidate
+            and "human" in rewrites
             and _textual_similarity(candidate, rewrites["human"]) > 0.60
         ):
-            # A second, dedicated Simple request keeps the same meaning while
-            # explicitly rejecting the too-similar Human wording.
-            candidate = generator(
-                sentence,
-                mode,
-                strength,
-                f"{rewrites['human']} Previous Simple attempt was too similar; use a new sentence pattern.",
-            )
-        # Ollama is optional. A stopped server, unavailable model, or weak
-        # response must not turn the Correction Agent into an HTTP 503.
-        if candidate and mode == "simple" and _textual_similarity(candidate, rewrites["human"]) > 0.60:
+            avoid_instruction = f"{rewrites['human']} Previous Simple attempt was too similar; use a new sentence pattern."
+            if gemini_client.configured():
+                candidate = _gemini_rewrite(sentence, mode, strength, avoid_instruction)
+            if not candidate and os.getenv("OPENAI_API_KEY"):
+                candidate = _openai_rewrite(sentence, mode, strength, avoid_instruction)
+            if not candidate:
+                candidate = ollama_rewrite(sentence, mode, strength, avoid_instruction)
+
+        # Validate diversity and guard thresholds
+        if candidate and mode == "simple" and "human" in rewrites and _textual_similarity(candidate, rewrites["human"]) > 0.60:
             candidate = None
         if candidate and any(_too_similar(candidate, prior) for prior in rewrites.values()):
             candidate = None
+
+        # 4. Final deterministic structural fallback
         if not candidate:
             candidate = _best_offline_rewrite(sentence, mode, strength, list(rewrites.values()))
         rewrites[mode] = candidate
+
     return rewrites
 
 
@@ -369,7 +407,37 @@ CHAT_TEMPLATES = [
 ]
 
 
+def _gemini_chat_reply(message: str, context: dict) -> str | None:
+    """Use Gemini for contextual academic assistance in the correction chatbot."""
+    if not gemini_client.configured():
+        return None
+    prompt = (
+        "You are an academic integrity and writing assistant in the Vidya Chaya Audit tool. "
+        "A student is reviewing a flagged sentence in their academic paper.\n"
+        f"Flagged Sentence: \"{context.get('sentence', '')}\"\n"
+        f"Matched Source: \"{context.get('source', '')}\"\n"
+        f"Similarity Score: {context.get('score', 0)}%\n\n"
+        f"Student question: {message}\n\n"
+        "Provide a concise, helpful, and professional response (1-3 sentences). "
+        "If they ask to rewrite, provide a high-quality academic rewrite. "
+        "If they ask for citation, provide APA or IEEE citation guidance. "
+        "Do not use markdown headers or long bulleted lists."
+    )
+    try:
+        reply = gemini_client.generate_text(prompt)
+        return reply.strip() if reply else None
+    except Exception as exc:
+        logger.warning("Gemini chat error, falling back to templates: %s", exc)
+        return None
+
+
 def chat_reply(message: str, context: dict) -> str:
+    # If Gemini is configured, use it for contextual assistant replies
+    gemini_answer = _gemini_chat_reply(message, context)
+    if gemini_answer:
+        return gemini_answer
+
+    # Fallback to existing deterministic templates
     for pattern, handler in CHAT_TEMPLATES:
         if pattern.search(message):
             return handler(context)

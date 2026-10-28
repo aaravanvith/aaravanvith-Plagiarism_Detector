@@ -50,7 +50,7 @@ def ollama_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") -> 
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=120,
+            timeout=(3.0, 120.0),
         )
 
         if response.status_code != 200:

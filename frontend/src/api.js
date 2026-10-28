@@ -55,12 +55,24 @@ async function handle(res) {
   return res.json();
 }
 
-export async function analyzeReport(file, studentName, usn, online = false) {
+export async function analyzeReport(file, onlineOrStudentName = false, usn = "", online = false) {
+  let actualOnline = false;
+  let actualStudentName = "";
+  let actualUsn = "";
+
+  if (typeof onlineOrStudentName === "boolean") {
+    actualOnline = onlineOrStudentName;
+  } else {
+    actualStudentName = onlineOrStudentName || "";
+    actualUsn = usn || "";
+    actualOnline = Boolean(online);
+  }
+
   const form = new FormData();
   form.append("file", file);
-  form.append("student_name", studentName || "");
-  form.append("usn", usn || "");
-  form.append("online", online ? "true" : "false");
+  form.append("student_name", actualStudentName);
+  form.append("usn", actualUsn);
+  form.append("online", actualOnline ? "true" : "false");
 
   const res = await fetch(`${BASE_URL}/api/analyze`, {
     method: "POST",

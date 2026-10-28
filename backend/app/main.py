@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+import os
 import shutil
 import threading
 import re
@@ -18,6 +19,7 @@ from .services.similarity import analyze_document
 from .services.semantic_similarity import invalidate_reference_embedding_cache
 from .services.ai_detection import detect_ai_content
 from .services import correction_agent as ca
+from .services import gemini_client
 from .services.document_correction import (
     CorrectionValidationError, create_corrected_file, parse_corrections,
 )
@@ -562,6 +564,30 @@ def analyze(
 
     flagged = [m for m in sim_report.sentence_matches if m.flagged]
 
+    all_sentence_records = []
+    for m in sim_report.sentence_matches:
+        has_enough_words = len(m.sentence.split()) >= 8
+        ai_info = detect_ai_content(m.sentence) if has_enough_words else None
+        all_sentence_records.append({
+            "sentence": m.sentence,
+            "similarity": m.best_score,
+            # The correction panel is opened from this list, so retain
+            # the match context required by the correction/chat endpoints.
+            "matched_source": m.best_source,
+            "matched_text": m.best_source_sentence,
+            "risk": m.risk,
+            "flagged": m.flagged,
+            "ai_probability": ai_info["ai_probability"] if ai_info else None,
+            "ai_label": ai_info["label"] if ai_info else "AI-style score unavailable for this sentence",
+            "ai_assessment_method": "experimental_synthetic_stylometry",
+            "tfidf_similarity": m.tfidf_score,
+            "cosine_similarity": m.cosine_score,
+            "semantic_similarity": m.semantic_score,
+            "hybrid_similarity": m.hybrid_score,
+            "start_offset": m.start_offset,
+            "end_offset": m.end_offset,
+        })
+
     return {
         "report_id": record.id,
         "filename": file.filename,
@@ -596,27 +622,7 @@ def analyze(
             }
             for m in flagged
         ],
-        "all_sentences": [
-            {
-                "sentence": m.sentence,
-                "similarity": m.best_score,
-                # The correction panel is opened from this list, so retain
-                # the match context required by the correction/chat endpoints.
-                "matched_source": m.best_source,
-                "matched_text": m.best_source_sentence,
-                "risk": m.risk,
-                "flagged": m.flagged,
-                "ai_probability": detect_ai_content(m.sentence)["ai_probability"] if len(m.sentence.split()) >= 8 else None,
-                "ai_assessment_method": "experimental_synthetic_stylometry",
-                "tfidf_similarity": m.tfidf_score,
-                "cosine_similarity": m.cosine_score,
-                "semantic_similarity": m.semantic_score,
-                "hybrid_similarity": m.hybrid_score,
-                "start_offset": m.start_offset,
-                "end_offset": m.end_offset,
-            }
-            for m in sim_report.sentence_matches
-        ],
+        "all_sentences": all_sentence_records,
         "extracted_text": raw_text,
     }
 
@@ -828,6 +834,16 @@ def repository_stats(db: Session = Depends(get_db)):
 def core_status():
     """Return configuration state only; a secret is never sent to the client."""
     return {"configured": core_configured(), "provider": "CORE"}
+
+
+@app.get("/api/correction/provider/status")
+def correction_provider_status():
+    """Return rewrite provider configuration status without leaking keys."""
+    return {
+        "gemini_configured": gemini_client.configured(),
+        "gemini_model": gemini_client._default_model(),
+        "ollama_model": os.getenv("OLLAMA_MODEL", "gemma2:2b"),
+    }
 
 
 @app.post("/api/repository/core/import")

@@ -3,8 +3,6 @@ import { FileText, Loader2, UploadCloud, X } from "lucide-react";
 
 export default function UploadPanel({ onAnalyze, loading, error }) {
   const [file, setFile] = useState(null);
-  const [studentName, setStudentName] = useState("");
-  const [usn, setUsn] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [online, setOnline] = useState(false);
 
@@ -14,7 +12,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
     e.preventDefault();
 
     if (file) {
-      onAnalyze(file, studentName, usn, online);
+      onAnalyze(file, online);
     }
   };
 
@@ -28,7 +26,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
       </h2>
 
       <p className="text-sm text-ink-400 mb-6">
-        Analyze your healthcare or engineering report for plagiarism and AI-generated content.
+        Analyze your healthcare or engineering report for plagiarism.
       </p>
 
       {/* Analysis Mode */}
@@ -38,7 +36,6 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
         </label>
 
         <div className="grid grid-cols-2 gap-3">
-
           {/* Offline */}
           <button
             type="button"
@@ -49,7 +46,8 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
                 : "border-ink-100 hover:border-ink-300"
             }`}
           >
-            <p className="text-sm font-semibold text-ink-800">Offline</p><p className="mt-1 text-xs text-ink-400">Local Repository</p>
+            <p className="text-sm font-semibold text-ink-800">Offline</p>
+            <p className="mt-1 text-xs text-ink-400">Local Repository</p>
           </button>
 
           {/* Online */}
@@ -62,9 +60,9 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
                 : "border-ink-100 hover:border-ink-300"
             }`}
           >
-            <p className="text-sm font-semibold text-ink-800">Online</p><p className="mt-1 text-xs text-ink-400">Online Academic Search</p>
+            <p className="text-sm font-semibold text-ink-800">Online</p>
+            <p className="mt-1 text-xs text-ink-400">Online Academic Search</p>
           </button>
-
         </div>
       </div>
 
@@ -116,7 +114,17 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
                 ⚠️ Large file (&gt;25 MB). Free cloud hosting (Render/Vercel) may drop large uploads. If it fails, upload text (.txt / .docx) or run the local backend.
               </p>
             )}
-            <button type="button" onClick={(event) => { event.stopPropagation(); setFile(null); if (inputRef.current) inputRef.current.value = ""; }} className="inline-flex items-center gap-1 text-xs font-medium text-risk-high hover:underline"><X className="h-3 w-3" />Remove file</button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setFile(null);
+                if (inputRef.current) inputRef.current.value = "";
+              }}
+              className="inline-flex items-center gap-1 text-xs font-medium text-risk-high hover:underline"
+            >
+              <X className="h-3 w-3" />Remove file
+            </button>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
@@ -133,37 +141,6 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
         )}
       </div>
 
-      {/* Student Details */}
-      <div className="grid grid-cols-2 gap-4 mt-6">
-
-        <div>
-          <label className="block text-xs font-medium text-ink-400 uppercase tracking-wide mb-1">
-            Student name (optional)
-          </label>
-
-          <input
-            value={studentName}
-            onChange={(e) => setStudentName(e.target.value)}
-            placeholder="Aarav Anvith S"
-            className="w-full rounded-md border border-ink-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal-400"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-ink-400 uppercase tracking-wide mb-1">
-            USN (optional)
-          </label>
-
-          <input
-            value={usn}
-            onChange={(e) => setUsn(e.target.value)}
-            placeholder="1EW23CI001"
-            className="w-full rounded-md border border-ink-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-seal-400"
-          />
-        </div>
-
-      </div>
-
       {/* Error */}
       {error && (
         <p className="mt-4 text-sm text-risk-high bg-risk-highBg rounded-md px-3 py-2">
@@ -171,7 +148,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
         </p>
       )}
 
-      {/* Analyze Button */}
+      {/* Analyze Button - sits neatly below the file upload area */}
       <button
         type="submit"
         disabled={!file || loading}
@@ -186,7 +163,11 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
           "Run Academic Integrity Analysis"
         )}
       </button>
-      {loading && <p role="status" className="mt-2 text-sm text-ink-500">The server may need up to two minutes to wake up before analysis starts.</p>}
+      {loading && (
+        <p role="status" className="mt-2 text-sm text-ink-500">
+          The server may need up to two minutes to wake up before analysis starts.
+        </p>
+      )}
     </form>
   );
 }

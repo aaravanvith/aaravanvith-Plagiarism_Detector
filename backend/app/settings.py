@@ -37,3 +37,10 @@ ENABLE_SEMANTIC_SIMILARITY = env_flag("ENABLE_SEMANTIC_SIMILARITY", False)
 SEMANTIC_MODEL_NAME = os.getenv("SEMANTIC_MODEL_NAME", "all-MiniLM-L6-v2")
 CORE_API_KEY = os.getenv("CORE_API_KEY", "")
 CORE_API_URL = os.getenv("CORE_API_URL", "https://api.core.ac.uk/v3/search/works/")
+GEMINI_REWRITE_MODEL = os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.8-flash")
+GEMINI_TIMEOUT = float(os.getenv("GEMINI_TIMEOUT", "30"))
+
+
+def get_gemini_api_key() -> str:
+    """Return configured GEMINI_API_KEY securely from environment without logging."""
+    return os.getenv("GEMINI_API_KEY", "").strip()
