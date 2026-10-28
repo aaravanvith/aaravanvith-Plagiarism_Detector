@@ -7,7 +7,6 @@ import {
 
 const features = [
   [FileSearch, "Hybrid plagiarism detection", "Combines TF-IDF, cosine similarity, SBERT semantic similarity, and hybrid analysis for explainable document review."],
-  [BrainCircuit, "AI content detection", "Identifies AI-like and human-like writing with the platform's Logistic Regression detector."],
   [Globe2, "Dynamic online analysis", "Expands the reference corpus with relevant academic sources retrieved through CORE."],
   [Database, "Offline analysis", "Reviews documents against the local academic corpus when online search is not required."],
   [Sparkles, "Correction Agent", "Uses the local Ollama and Gemma 2B setup to assist with rewriting flagged content."],
