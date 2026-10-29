@@ -61,11 +61,57 @@ function Results({ result, activeSentence, onSelectSentence, corrections, previe
         <div className="flex flex-col items-center gap-8 sm:flex-row">
           <ScoreSeal score={result.plagiarism_score} verdict={result.verdict} />
           <div className="flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">Analysis complete</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">Analysis complete</p>
+              {result.analysis_mode && (
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  result.analysis_mode === "online" && result.online_sources_compared > 0
+                    ? "bg-seal-50 text-seal-700 border border-seal-200"
+                    : "bg-ink-100 text-ink-700 border border-ink-200"
+                }`}>
+                  {result.analysis_mode === "online" && result.online_sources_compared > 0
+                    ? "Online Mode · Academic Search"
+                    : "Offline Mode · Local Corpus"}
+                </span>
+              )}
+            </div>
             <h2 className="font-display text-2xl text-ink-900">{result.filename}</h2>
-            <p className="mt-2 text-sm text-ink-500">{result.flagged_sentence_count} of {result.total_sentences} sentences flagged · {result.total_sources_compared} sources compared.</p>
+            <p className="mt-2 text-sm text-ink-500">
+              {result.flagged_sentence_count} of {result.total_sentences} sentences flagged ·{" "}
+              {result.analysis_mode === "online" && result.online_sources_compared > 0 ? (
+                <span>
+                  <strong className="text-seal-700 font-semibold">{result.total_sources_compared} sources compared</strong>{" "}
+                  ({result.online_sources_compared} online from CORE + {result.local_sources_compared} local)
+                </span>
+              ) : (
+                <span>
+                  <strong className="text-ink-700 font-semibold">{result.total_sources_compared} local sources compared</strong>
+                </span>
+              )}
+            </p>
             <p className="mt-3 text-xs text-ink-400">{result.similarity_method?.semantic_available ? "Hybrid score: TF-IDF, cosine similarity, and semantic similarity." : "TF-IDF cosine scoring is active. Semantic scoring is unavailable or disabled."}</p>
-            <div className="mt-4 flex flex-wrap gap-2">{(result.sources_compared || []).map((s) => <span key={s} className="rounded bg-ink-50 px-2 py-1 font-mono text-xs text-ink-600">{s}</span>)}</div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {(result.sources_compared || []).map((s) => {
+                const isOnline = s.startsWith("online::");
+                return (
+                  <span
+                    key={s}
+                    className={`rounded px-2 py-1 font-mono text-xs ${
+                      isOnline
+                        ? "bg-sky-50 text-sky-700 border border-sky-200 font-semibold"
+                        : "bg-ink-50 text-ink-600"
+                    }`}
+                  >
+                    {isOnline ? "🌐 " : ""}{s}
+                  </span>
+                );
+              })}
+              {result.total_sources_compared > (result.sources_compared || []).length && (
+                <span className="text-xs text-ink-400 font-medium">
+                  + {result.total_sources_compared - (result.sources_compared || []).length} more {result.analysis_mode === "online" ? "total " : "local "}sources
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </section>
