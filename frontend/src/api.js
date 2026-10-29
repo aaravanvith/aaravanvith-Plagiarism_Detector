@@ -1,45 +1,83 @@
-function resolveBaseUrl() {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL.replace(/\/+$/, "");
-  }
+let resolvedBaseUrl = null;
+
+function getInitialBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_URL;
   if (typeof window !== "undefined" && window.location) {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host.endsWith(".local")) {
-      return `http://${host}:8000`;
+      if (envUrl && !envUrl.includes("onrender.com")) {
+        return envUrl.replace(/\/+$/, "");
+      }
+      return "http://127.0.0.1:8001";
     }
   }
+  if (envUrl) return envUrl.replace(/\/+$/, "");
   return "https://vidya-chaya-audit.onrender.com";
 }
 
-const BASE_URL = resolveBaseUrl();
+let BASE_URL = getInitialBaseUrl();
 let readiness = null;
 
 async function waitForBackend() {
+  if (resolvedBaseUrl) return resolvedBaseUrl;
   if (!readiness) {
     readiness = (async () => {
+      const isLocalhost =
+        typeof window !== "undefined" &&
+        window.location &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1" ||
+          window.location.hostname === "0.0.0.0" ||
+          window.location.hostname.endsWith(".local"));
+
+      const envUrl = import.meta.env.VITE_API_URL;
+      const candidates = [];
+      if (isLocalhost) {
+        if (envUrl && !envUrl.includes("onrender.com")) {
+          candidates.push(envUrl.replace(/\/+$/, ""));
+        }
+        candidates.push("http://127.0.0.1:8001", "http://localhost:8001", "http://127.0.0.1:8000", "http://localhost:8000");
+      } else {
+        if (envUrl) candidates.push(envUrl.replace(/\/+$/, ""));
+        candidates.push("https://vidya-chaya-audit.onrender.com");
+      }
+
+      const uniqueCandidates = [...new Set(candidates)];
       const deadline = Date.now() + 120000;
       while (Date.now() < deadline) {
-        try {
-          const res = await globalThis.fetch(`${BASE_URL}/api/health`, {
-            signal: AbortSignal.timeout(10000), cache: "no-store",
-          });
-          if (res.ok && (await res.json()).status === "ok") return;
-        } catch (_) {
-          // Render can return a loading page or a network error during startup.
+        for (const candidate of uniqueCandidates) {
+          try {
+            const res = await globalThis.fetch(`${candidate}/api/health`, {
+              signal: AbortSignal.timeout(3000),
+              cache: "no-store",
+            });
+            if (res.ok && (await res.json()).status === "ok") {
+              resolvedBaseUrl = candidate;
+              BASE_URL = candidate;
+              return candidate;
+            }
+          } catch (_) {}
         }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
-      throw new Error("The backend did not start within two minutes. Please try again or check the Render service logs.");
-    })().finally(() => { readiness = null; });
+      throw new Error("The backend did not start within two minutes. Please try again or check the Render/local service logs.");
+    })().finally(() => {
+      readiness = null;
+    });
   }
   return readiness;
 }
 
-async function fetch(url, options = {}) {
-  await waitForBackend();
+async function fetch(endpointOrUrl, options = {}) {
+  const baseUrl = await waitForBackend();
+  const url =
+    endpointOrUrl.startsWith("http://") || endpointOrUrl.startsWith("https://")
+      ? endpointOrUrl.replace(/^https?:\/\/[^/]+/, baseUrl)
+      : `${baseUrl}${endpointOrUrl.startsWith("/") ? "" : "/"}${endpointOrUrl}`;
   try {
     const res = await globalThis.fetch(url, {
-      ...options, signal: AbortSignal.timeout(180000),
+      ...options,
+      signal: AbortSignal.timeout(180000),
     });
     if ([502, 503, 504].includes(res.status)) {
       throw new Error("The backend is temporarily unavailable. Please try again after it finishes starting.");

@@ -610,6 +610,14 @@ def analyze(
 
     if online:
         online_corpus = build_online_corpus(text)
+        if not online_corpus:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Online academic search could not retrieve matching academic papers from CORE for this query. "
+                    "Please refine the document keywords or switch to Offline mode."
+                ),
+            )
 
         corpus = {
             **local_corpus,
@@ -717,7 +725,7 @@ def analyze(
         "verdict": sim_report.verdict,
         "total_sources_compared": len(corpus),
         "sources_compared": _format_sources_preview(sim_report.sources_used, online_corpus),
-        "analysis_mode": "online" if (online and len(online_corpus) > 0) else "offline",
+        "analysis_mode": "online" if online else "offline",
         "local_sources_compared": len(local_corpus),
         "online_sources_compared": len(online_corpus),
         "total_sentences": len(sim_report.sentence_matches),

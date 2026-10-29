@@ -119,6 +119,21 @@ class TestReanalysisAndModes(unittest.TestCase):
         self.assertEqual(res.status_code, 502)
         self.assertIn("Online academic search failed", res.json()["detail"])
 
+    @patch("app.main.search_works")
+    @patch("app.main.core_configured", return_value=True)
+    def test_online_mode_does_not_silently_fallback_when_zero_papers_found(self, mock_configured, mock_search):
+        """Verify Online mode returns HTTP 502 instead of silently returning offline mode when 0 papers are found."""
+        mock_search.return_value = ([], 0)
+
+        file_obj = io.BytesIO(self.sample_text.encode("utf-8"))
+        res = self.client.post(
+            "/api/analyze",
+            files={"file": ("report.txt", file_obj, "text/plain")},
+            data={"online": "true"},
+        )
+        self.assertEqual(res.status_code, 502)
+        self.assertIn("could not retrieve matching academic papers", res.json()["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
