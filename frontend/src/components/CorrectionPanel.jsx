@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Sparkles, MessageCircle, Send, X, Quote } from "lucide-react";
 import { correctSentence, sendChat } from "../api";
 
-export default function CorrectionPanel({ sentence, onClose, onApply, isApplied }) {
+export default function CorrectionPanel({ sentence, onClose, onApply, isApplied, appliedCorrection }) {
   const [correction, setCorrection] = useState(null);
   const [rewriteMode, setRewriteMode] = useState("academic");
   const [rewriteStrength, setRewriteStrength] = useState("moderate");
@@ -118,7 +118,20 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
                   </button>
                 ))}
               </div>
-              <p className="mb-1 text-xs font-semibold capitalize text-seal-600">{rewriteMode} version</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold capitalize text-seal-600">{rewriteMode} version</p>
+                {correction.provider && (
+                  <span
+                    className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                      correction.provider === "offline"
+                        ? "bg-ink-100 text-ink-600 border border-ink-200"
+                        : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    }`}
+                  >
+                    {correction.provider === "offline" ? "Offline structural rewrite" : "AI rewrite"}
+                  </span>
+                )}
+              </div>
               <p role="tabpanel" aria-live="polite" key={rewriteMode} className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
                 {correction.rewrites?.[rewriteMode] || correction.rewritten}
               </p>
@@ -130,10 +143,19 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied 
                   corrected: correction.rewrites?.[rewriteMode] || correction.rewritten,
                   start_offset: correction.start_offset,
                   end_offset: correction.end_offset,
+                  mode: rewriteMode,
                 })}
-                className="mt-2 w-full rounded-md bg-seal-500 px-3 py-2 text-sm font-medium text-white hover:bg-seal-600"
+                className={`mt-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  appliedCorrection && appliedCorrection.corrected === (correction.rewrites?.[rewriteMode] || correction.rewritten)
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                    : "bg-seal-500 text-white hover:bg-seal-600"
+                }`}
               >
-                {isApplied ? "Update applied correction" : "Apply corrected sentence"}
+                {appliedCorrection && appliedCorrection.corrected === (correction.rewrites?.[rewriteMode] || correction.rewritten)
+                  ? `Applied to document (${rewriteMode} version)`
+                  : isApplied
+                    ? `Update with ${rewriteMode} version`
+                    : "Apply corrected sentence"}
               </button>
             </Section>
 

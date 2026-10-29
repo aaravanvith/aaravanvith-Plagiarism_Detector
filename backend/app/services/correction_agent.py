@@ -39,6 +39,16 @@ _PARTICIPLES = {
     "propose": "proposed", "proposes": "proposed", "provide": "provided", "provides": "provided",
     "support": "supported", "supports": "supported", "improve": "improved", "improves": "improved",
     "collect": "collected", "collects": "collected",
+    "evaluate": "evaluated", "evaluates": "evaluated",
+    "examine": "examined", "examines": "examined",
+    "investigate": "investigated", "investigates": "investigated",
+    "measure": "measured", "measures": "measured",
+    "assess": "assessed", "assesses": "assessed",
+    "demonstrate": "demonstrated", "demonstrates": "demonstrated",
+    "observe": "observed", "observes": "observed",
+    "track": "tracked", "tracks": "tracked",
+    "present": "presented", "presents": "presented",
+    "predict": "predicted", "predicts": "predicted",
 }
 _BASE_VERBS = {
     "detects": "detect", "identifies": "identify", "stores": "store", "uses": "use",
@@ -47,6 +57,9 @@ _BASE_VERBS = {
     "manages": "manage", "records": "record", "proposes": "propose", "provides": "provide",
     "supports": "support", "improves": "improve",
     "collects": "collect",
+    "evaluates": "evaluate", "examines": "examine", "investigates": "investigate",
+    "measures": "measure", "assesses": "assess", "demonstrates": "demonstrate",
+    "observes": "observe", "tracks": "track", "presents": "present", "predicts": "predict",
 }
 
 
@@ -92,10 +105,12 @@ def _split_clause(sentence: str) -> tuple[str, str, str] | None:
         "detects|detect|identifies|identify|stores|store|uses|use|combines|combine|"
         "integrates|integrate|monitors|monitor|analyzes|analyze|generates|generate|"
         "processes|process|manages|manage|records|record|proposes|propose|provides|provide|"
-        "supports|support|improves|improve|collects|collect"
+        "supports|support|improves|improve|collects|collect|evaluates|evaluate|"
+        "examines|examine|investigates|investigate|measures|measure|assesses|assess|"
+        "demonstrates|demonstrate|observes|observe|tracks|track|presents|present|predicts|predict"
     )
     match = re.match(
-        rf"^(?P<subject>(?:the|this|that|an|a)\s+[^,]+?)\s+(?P<verb>{verbs})\s+(?P<object>.+)$",
+        rf"^(?P<subject>(?:the|this|that|an|a|[A-Z][a-zA-Z0-9_\-]*)\s+[^,]+?)\s+(?P<verb>{verbs})\s+(?P<object>.+)$",
         _core(sentence), re.I,
     )
     return (match.group("subject"), match.group("verb"), match.group("object")) if match else None
@@ -108,22 +123,55 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
     parsed = _split_clause(sentence)
     if parsed:
         subject, verb, obj = parsed
-        participle = _PARTICIPLES.get(verb.lower())
-        tail = re.match(r"(?P<object>.+?)\s+(?P<link>using|through|with|to)\s+(?P<detail>.+)$", obj, re.I)
-        if participle:
-            candidates.append(_sentence(f"{obj} are {participle} by {subject}", ending))
-            if tail and tail.group("link").lower() in {"using", "through", "with"}:
+        subject_lower = subject[0].lower() + subject[1:] if not subject.isupper() else subject
+        participle = _PARTICIPLES.get(verb.lower(), verb.lower())
+        base_v = _base_verb(verb)
+        tail = re.match(r"(?P<object>.+?)\s+(?P<link>using|through|with|to|via)\s+(?P<detail>.+)$", obj, re.I)
+
+        if mode == "academic":
+            if tail and tail.group("link").lower() in {"using", "through", "with", "via"}:
                 candidates.append(_sentence(
-                    f"Through {tail.group('detail')}, {tail.group('object')} are {participle} by {subject}", ending
+                    f"Through {tail.group('detail')}, {tail.group('object')} are {participle} by {subject_lower}", ending
                 ))
-        if tail:
+                candidates.append(_sentence(
+                    f"{tail.group('object').capitalize()} are systematically {participle} by {subject_lower} via {tail.group('detail')}", ending
+                ))
+                candidates.append(_sentence(
+                    f"Utilization of {tail.group('detail')} enables {subject_lower} to {base_v} {tail.group('object')}", ending
+                ))
+            else:
+                candidates.append(_sentence(f"{obj.capitalize()} are {participle} by {subject_lower}", ending))
+                candidates.append(_sentence(f"Systematic evaluation of {obj} is conducted by {subject_lower}", ending))
             candidates.append(_sentence(
-                f"{subject} relies on {tail.group('detail')} to {verb.lower()} {tail.group('object')}", ending
+                f"{subject} relies on {tail.group('detail') if tail else obj} to {base_v} {tail.group('object') if tail else 'the primary objectives'}", ending
             ))
-            candidates.append(_sentence(
-                f"{tail.group('object').capitalize()} are handled by {subject} {tail.group('link').lower()} {tail.group('detail')}",
-                ending,
-            ))
+            return candidates
+
+        if mode == "human":
+            if tail:
+                return [
+                    _sentence(f"With {tail.group('detail')}, {subject_lower} can {base_v} {tail.group('object')}", ending),
+                    _sentence(f"{subject} uses {tail.group('detail')} to {base_v} {tail.group('object')}", ending),
+                    _sentence(f"{tail.group('object').capitalize()} are handled through {tail.group('detail')} by {subject_lower}", ending),
+                ]
+            return [
+                _sentence(f"{subject} is responsible for {_gerund(verb)} {obj}", ending),
+                _sentence(f"In practice, {subject} helps {base_v} {obj}", ending),
+                _sentence(f"{obj.capitalize()} form part of the work carried out by {subject_lower}", ending),
+            ]
+
+        if mode == "simple":
+            if tail:
+                return [
+                    _sentence(f"{subject} uses {tail.group('detail')} to {base_v} {tail.group('object')}", ending),
+                    _sentence(f"{tail.group('object').capitalize()} can be {participle} using {tail.group('detail')}", ending),
+                    _sentence(f"The {tail.group('detail')} help {subject_lower} {base_v} {tail.group('object')}", ending),
+                ]
+            return [
+                _sentence(f"{subject} can {base_v} {obj}", ending),
+                _sentence(f"{obj.capitalize()} can be {participle} by {subject_lower}", ending),
+                _sentence(f"{subject} is used to {base_v} {obj}", ending),
+            ]
 
     relative = re.match(r"^(?P<intro>.+?)\s+that\s+(?P<detail>.+)$", core, re.I)
     if relative:
@@ -132,36 +180,31 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
             _sentence(f"{relative.group('intro')} is designed around {relative.group('detail')}", ending),
         ])
 
-    # For unparseable sentences, reorganize at the sentence level rather than
-    # pretending a few changed words are a paraphrase.
-    fallback_prefix = {
-        "academic": "The subject addressed in this report is",
-        "human": "This report covers",
-        "simple": "Report topic",
-    }[mode]
-    candidates.append(_sentence(f"{fallback_prefix}: {core}", ending))
+    prep = re.match(r"^(?P<main>.+?)\s+(?P<prep>using|through|via|with|during|in|for)\s+(?P<detail>[^.!?]+)$", core, re.I)
+    if prep:
+        main, link, detail = prep.group("main"), prep.group("prep").lower(), prep.group("detail")
+        main_lower = main[0].lower() + main[1:]
+        if mode == "academic":
+            candidates.append(_sentence(f"Through {detail}, {main_lower} is systematically conducted", ending))
+            candidates.append(_sentence(f"In the context of {detail}, {main_lower}", ending))
+        elif mode == "human":
+            candidates.append(_sentence(f"By {link} {detail}, {main_lower}", ending))
+            candidates.append(_sentence(f"With {detail}, {main_lower}", ending))
+        else:
+            candidates.append(_sentence(f"{link.capitalize()} {detail}, {main_lower}", ending))
+            candidates.append(_sentence(f"Using {detail}, {main_lower}", ending))
 
-    if mode == "human" and parsed:
-        subject, verb, obj = parsed
-        tail = re.match(r"(?P<object>.+?)\s+(?P<link>using|through|with|to)\s+(?P<detail>.+)$", obj, re.I)
-        if tail:
-            return [
-                _sentence(f"With {tail.group('detail')}, {subject} can {_base_verb(verb)} {tail.group('object')}", ending),
-                _sentence(f"{subject} uses {tail.group('detail')} to {_base_verb(verb)} {tail.group('object')}", ending),
-                _sentence(f"{tail.group('object').capitalize()} are handled through {tail.group('detail')} by {subject}", ending),
-            ]
-        return [
-            _sentence(f"{subject} is responsible for {_gerund(verb)} {obj}", ending),
-            _sentence(f"Within {subject}, {obj} are { _PARTICIPLES.get(verb.lower(), verb.lower()) } as part of the process", ending),
-            _sentence(f"{obj.capitalize()} form part of the work carried out by {subject}", ending),
-        ]
-    if mode == "simple" and parsed:
-        subject, verb, obj = parsed
-        return [
-            _sentence(f"{subject} can {_base_verb(verb)} {obj}", ending),
-            _sentence(f"{obj.capitalize()} can be {_PARTICIPLES.get(verb.lower(), verb.lower())} by {subject}", ending),
-            _sentence(f"{subject} is used to {_base_verb(verb)} {obj}", ending),
-        ]
+    core_lower = core[0].lower() + core[1:]
+    if mode == "academic":
+        candidates.append(_sentence(f"In this investigation, {core_lower}", ending))
+        candidates.append(_sentence(f"Experimental evidence indicates that {core_lower}", ending))
+    elif mode == "human":
+        candidates.append(_sentence(f"In practical terms, {core_lower}", ending))
+        candidates.append(_sentence(f"From our observations, {core_lower}", ending))
+    else:
+        candidates.append(_sentence(f"Overall, {core_lower}", ending))
+        candidates.append(_sentence(f"In short, {core_lower}", ending))
+
     return candidates
 
 
@@ -205,22 +248,33 @@ def _best_offline_rewrite(sentence: str, mode: str, strength: str, avoid: list[s
             return min(choices, key=lambda item: SequenceMatcher(None, _tokens(sentence), _tokens(item)).ratio())
         return max(choices, key=lambda item: _candidate_score(sentence, item))
     core = _core(sentence)
-    prefix = {"academic": "The subject addressed in this report is", "human": "This report covers", "simple": "Report topic"}[mode]
-    return _sentence(f"{prefix}: {core}", _ending(sentence))
+    ending = _ending(sentence)
+    core_lower = core[0].lower() + core[1:]
+    if mode == "academic":
+        return _sentence(f"In this context, {core_lower}", ending)
+    if mode == "human":
+        return _sentence(f"In practical terms, {core_lower}", ending)
+    return _sentence(f"Overall, {core_lower}", ending)
 
 
 _MODE_INSTRUCTIONS = {
     "academic": (
-        "You are an IEEE research-paper editor. Write one formal, professional sentence using advanced "
-        "academic vocabulary. Restructure the sentence completely; passive voice is encouraged where natural."
+        "You are an IEEE research-paper editor. Rewrite this single sentence in formal academic prose using "
+        "advanced vocabulary and complete syntactic restructuring (passive/objective framing encouraged). "
+        "Preserve all scientific facts, medical terminology, acronyms, and conclusions exactly. "
+        "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
     ),
     "human": (
-        "You are a university student writing naturally. Use conversational but professional active voice, "
-        "reorder the ideas, and make the sentence sound independently written. Avoid overly formal wording."
+        "You are a university student. Rewrite this single sentence in natural, fluent, conversational active voice. "
+        "Restructure the ideas and clauses so the sentence sounds independently composed. "
+        "Preserve all scientific facts, medical terminology, acronyms, and conclusions exactly. "
+        "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
     ),
     "simple": (
-        "You write for school-level readers. Use very easy English, common vocabulary, and the shortest "
-        "clear sentence possible. Prefer a different subject and clause order from a normal conversational rewrite."
+        "You write for school-level readers. Rewrite this single sentence using clear, easy everyday English "
+        "and a direct sentence structure. Do not return the sentence unchanged or identical to the original. "
+        "Preserve all scientific facts, medical terminology, acronyms, and conclusions accurately. "
+        "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
     ),
 }
 
@@ -231,16 +285,22 @@ def _clean_llm_output(text: str) -> str:
     if cleaned.startswith("```") and cleaned.endswith("```"):
         lines = cleaned.splitlines()
         cleaned = "\n".join(lines[1:-1]).strip()
-    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
-        cleaned = cleaned[1:-1].strip()
-    cleaned = re.sub(
-        r"^(?:(?:rewritten\s+)?sentence|rewrite|academic(?:\s+version)?|human(?:\s+version)?|simple(?:\s+version)?):\s*",
-        "",
-        cleaned,
-        flags=re.I,
-    ).strip()
-    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
-        cleaned = cleaned[1:-1].strip()
+    # If the model output multiple lines, pick the first non-empty line that isn't a header/bullet
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^(?:\d+[\.)]|\*|-)\s*", "", line).strip()
+        line = re.sub(
+            r"^(?:(?:rewritten\s+)?sentence|rewrite|academic(?:\s+version)?|human(?:\s+version)?|simple(?:\s+version)?):\s*",
+            "",
+            line,
+            flags=re.I,
+        ).strip()
+        if (line.startswith('"') and line.endswith('"')) or (line.startswith("'") and line.endswith("'")):
+            line = line[1:-1].strip()
+        if line:
+            return line
     return cleaned
 
 
@@ -257,14 +317,15 @@ def _gemini_client():
 
 def _rewrite_prompt(sentence: str, mode: str, strength: str, avoid: str = "") -> str:
     prompt = (
-        f"{_MODE_INSTRUCTIONS[mode]} Rewrite strength: {strength}. Preserve meaning and technical terms exactly. "
-        "Return only the rewritten sentence. Do not use filler such as 'In other words'. Do not add facts.\n"
-        f"Sentence: {sentence}"
+        f"{_MODE_INSTRUCTIONS[mode]}\n"
+        f"Rewrite strength: {strength}. Maintain precision: preserve all medical terms, acronyms, and scientific conclusions. "
+        "Do not use conversational filler (such as 'In other words'). Return ONLY the single rewritten sentence.\n"
+        f"Original sentence: {sentence}"
     )
     if avoid:
         prompt += (
-            f"\nDo not copy the wording, subject order, or sentence pattern of this Human rewrite: {avoid} "
-            "Your wording must share fewer than 60% of its content words with it."
+            f"\nDo not copy the structure or wording of this rewrite: {avoid} "
+            "Use a distinct sentence pattern."
         )
     return prompt
 
@@ -311,7 +372,11 @@ def _openai_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") ->
     return rewrite if _valid_candidate(sentence, rewrite) else None
 
 
-def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, str]:
+def rewrite_suggestions(
+    sentence: str,
+    strength: str = "moderate",
+    return_provider: bool = False,
+) -> dict[str, str] | tuple[dict[str, str], str]:
     """Create independent, validated mode outputs for instant client-side tabs.
 
     Provider hierarchy:
@@ -323,21 +388,30 @@ def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, 
     strength = strength if strength in {"light", "moderate", "strong", "maximum"} else "moderate"
 
     rewrites: dict[str, str] = {}
+    provider_used = "offline"
+
     for mode in _MODES:
         avoid = rewrites.get("human", "") if mode == "simple" else ""
         candidate = None
+        mode_provider = "offline"
 
         # 1. Primary provider: Gemini API
         if gemini_client.configured():
             candidate = _gemini_rewrite(sentence, mode, strength, avoid)
+            if candidate:
+                mode_provider = "gemini"
 
         # 2. Secondary provider: OpenAI if configured
         if not candidate and os.getenv("OPENAI_API_KEY"):
             candidate = _openai_rewrite(sentence, mode, strength, avoid)
+            if candidate:
+                mode_provider = "openai"
 
         # 3. Tertiary provider: Local Ollama
         if not candidate:
             candidate = ollama_rewrite(sentence, mode, strength, avoid)
+            if candidate:
+                mode_provider = "ollama"
 
         # Dedicated Simple mode similarity guard against human mode
         if (
@@ -347,24 +421,36 @@ def rewrite_suggestions(sentence: str, strength: str = "moderate") -> dict[str, 
             and _textual_similarity(candidate, rewrites["human"]) > 0.60
         ):
             avoid_instruction = f"{rewrites['human']} Previous Simple attempt was too similar; use a new sentence pattern."
+            new_cand = None
             if gemini_client.configured():
-                candidate = _gemini_rewrite(sentence, mode, strength, avoid_instruction)
-            if not candidate and os.getenv("OPENAI_API_KEY"):
-                candidate = _openai_rewrite(sentence, mode, strength, avoid_instruction)
-            if not candidate:
-                candidate = ollama_rewrite(sentence, mode, strength, avoid_instruction)
+                new_cand = _gemini_rewrite(sentence, mode, strength, avoid_instruction)
+            if not new_cand and os.getenv("OPENAI_API_KEY"):
+                new_cand = _openai_rewrite(sentence, mode, strength, avoid_instruction)
+            if not new_cand:
+                new_cand = ollama_rewrite(sentence, mode, strength, avoid_instruction)
+            if new_cand:
+                candidate = new_cand
 
         # Validate diversity and guard thresholds
         if candidate and mode == "simple" and "human" in rewrites and _textual_similarity(candidate, rewrites["human"]) > 0.60:
             candidate = None
+            mode_provider = "offline"
         if candidate and any(_too_similar(candidate, prior) for prior in rewrites.values()):
             candidate = None
+            mode_provider = "offline"
 
         # 4. Final deterministic structural fallback
         if not candidate:
             candidate = _best_offline_rewrite(sentence, mode, strength, list(rewrites.values()))
+            mode_provider = "offline"
+
+        if mode_provider != "offline":
+            provider_used = mode_provider
+
         rewrites[mode] = candidate
 
+    if return_provider:
+        return rewrites, provider_used
     return rewrites
 
 
@@ -385,11 +471,13 @@ def suggest_citation(source_name: str, style: str = "APA") -> str:
 
 
 def correct_sentence(sentence: str, source_name: str, score: float, seed: int = 0, strength: str = "moderate") -> dict:
-    rewrites = rewrite_suggestions(sentence, strength=strength)
+    rewrites, provider = rewrite_suggestions(sentence, strength=strength, return_provider=True)
     return {
         "original": sentence,
         "rewritten": rewrites["academic"],  # Existing consumers retain this default.
         "rewrites": rewrites,
+        "provider": provider,
+        "is_fallback": provider == "offline",
         "explanation": explain_flag(sentence, source_name, score),
         "citation_apa": suggest_citation(source_name, "APA"),
         "citation_ieee": suggest_citation(source_name, "IEEE"),

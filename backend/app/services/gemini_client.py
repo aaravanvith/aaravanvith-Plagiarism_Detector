@@ -58,7 +58,7 @@ class GeminiRequestError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Internal state -- one client instance shared across requests
 # ---------------------------------------------------------------------------
-
+_client: Optional[object] = None
 
 
 def _key() -> str:
@@ -78,10 +78,10 @@ def is_available() -> bool:
 
 def _default_model() -> str:
     """Return the currently supported Gemini model identifier."""
-    model = os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.8-flash").strip()
-    # Guard against invalid legacy strings in older .env templates
-    if not model or model in ("gemini-3.5-flash", "gemini-2.5-flash"):
-        return "gemini-3.8-flash"
+    model = os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.5-flash").strip()
+    # Guard against retired models or models with known severe capacity bottlenecks
+    if not model or model in ("gemini-2.5-flash", "gemini-3.8-flash"):
+        return "gemini-3.5-flash"
     return model
 
 
@@ -170,8 +170,8 @@ def generate_text(
     """
     client = get_client()
     chosen_model = model or _default_model()
-    if chosen_model in ("gemini-3.5-flash", "gemini-2.5-flash"):
-        chosen_model = "gemini-3.8-flash"
+    if chosen_model == "gemini-2.5-flash":
+        chosen_model = "gemini-3.5-flash"
 
     max_retries = _max_retries()
     last_exc: Exception | None = None
@@ -228,6 +228,12 @@ def generate_text(
                 raise GeminiConfigurationError(
                     f"Gemini model '{chosen_model}' was not found: {exc}"
                 ) from exc
+
+            # Transient capacity spikes (503 UNAVAILABLE or 504 DEADLINE_EXCEEDED):
+            # Attempt failover to gemini-3.5-flash-lite on subsequent attempt
+            if ("503" in exc_str or "unavailable" in exc_str.lower() or "504" in exc_str or "deadline" in exc_str.lower()) and chosen_model != "gemini-3.5-flash-lite":
+                logger.info("Failing over Gemini request to gemini-3.5-flash-lite due to transient capacity: %s", exc)
+                chosen_model = "gemini-3.5-flash-lite"
 
             # Transient errors: retry with exponential back-off.
             last_exc = exc

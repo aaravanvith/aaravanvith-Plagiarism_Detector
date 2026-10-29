@@ -54,11 +54,11 @@ class TestGeminiClient(unittest.TestCase):
     def test_default_model_selection_and_legacy_sanitization(self):
         # Default
         os.environ.pop("GEMINI_REWRITE_MODEL", None)
-        self.assertEqual(gemini_client._default_model(), "gemini-3.8-flash")
+        self.assertEqual(gemini_client._default_model(), "gemini-3.5-flash")
 
-        # Legacy non-existent model sanitization
-        os.environ["GEMINI_REWRITE_MODEL"] = "gemini-3.5-flash"
-        self.assertEqual(gemini_client._default_model(), "gemini-3.8-flash")
+        # Retired model sanitization
+        os.environ["GEMINI_REWRITE_MODEL"] = "gemini-2.5-flash"
+        self.assertEqual(gemini_client._default_model(), "gemini-3.5-flash")
 
         # Explicit valid override
         os.environ["GEMINI_REWRITE_MODEL"] = "gemini-2.0-flash"
@@ -89,7 +89,7 @@ class TestGeminiClient(unittest.TestCase):
             self.assertEqual(output, "Through wearable sensors, patient health is monitored.")
             mock_client.models.generate_content.assert_called_once()
             call_kwargs = mock_client.models.generate_content.call_args[1]
-            self.assertEqual(call_kwargs["model"], "gemini-3.8-flash")
+            self.assertEqual(call_kwargs["model"], "gemini-3.5-flash")
 
     def test_generate_text_auth_error_no_retry(self):
         os.environ["GEMINI_API_KEY"] = "mock-key"
@@ -253,7 +253,7 @@ class TestCorrectionApiEndpoints(unittest.TestCase):
         self.assertIn("gemini_configured", data)
         self.assertIn("gemini_model", data)
         self.assertIn("ollama_model", data)
-        self.assertEqual(data["gemini_model"], "gemini-3.8-flash")
+        self.assertEqual(data["gemini_model"], "gemini-3.5-flash")
 
     def test_correct_endpoint(self):
         payload = {
@@ -272,6 +272,8 @@ class TestCorrectionApiEndpoints(unittest.TestCase):
         self.assertIn("academic", data["rewrites"])
         self.assertIn("human", data["rewrites"])
         self.assertIn("simple", data["rewrites"])
+        self.assertIn("provider", data)
+        self.assertIn("is_fallback", data)
         self.assertEqual(data["start_offset"], 0)
         self.assertEqual(data["end_offset"], 52)
 

@@ -39,7 +39,7 @@ CORE_API_KEY = os.getenv("CORE_API_KEY", "")
 CORE_API_URL = os.getenv("CORE_API_URL", "https://api.core.ac.uk/v3/search/works/")
 CORE_MAX_PAGES = int(os.getenv("CORE_MAX_PAGES", "3"))
 CORE_MAX_PAPERS = int(os.getenv("CORE_MAX_PAPERS", "15"))
-GEMINI_REWRITE_MODEL = os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.8-flash")
+GEMINI_REWRITE_MODEL = os.getenv("GEMINI_REWRITE_MODEL", "gemini-3.5-flash")
 GEMINI_TIMEOUT = float(os.getenv("GEMINI_TIMEOUT", "30"))
 
 
