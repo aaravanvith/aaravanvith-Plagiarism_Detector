@@ -90,28 +90,6 @@ function Results({ result, activeSentence, onSelectSentence, corrections, previe
               )}
             </p>
             <p className="mt-3 text-xs text-ink-400">{result.similarity_method?.semantic_available ? "Hybrid score: TF-IDF, cosine similarity, and semantic similarity." : "TF-IDF cosine scoring is active. Semantic scoring is unavailable or disabled."}</p>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {(result.sources_compared || []).map((s) => {
-                const isOnline = s.startsWith("online::");
-                return (
-                  <span
-                    key={s}
-                    className={`rounded px-2 py-1 font-mono text-xs ${
-                      isOnline
-                        ? "bg-sky-50 text-sky-700 border border-sky-200 font-semibold"
-                        : "bg-ink-50 text-ink-600"
-                    }`}
-                  >
-                    {isOnline ? "🌐 " : ""}{s}
-                  </span>
-                );
-              })}
-              {result.total_sources_compared > (result.sources_compared || []).length && (
-                <span className="text-xs text-ink-400 font-medium">
-                  + {result.total_sources_compared - (result.sources_compared || []).length} more {result.analysis_mode === "online" ? "total " : "local "}sources
-                </span>
-              )}
-            </div>
           </div>
         </div>
       </section>
