@@ -296,8 +296,8 @@ def build_online_corpus(text: str) -> dict[str, str]:
     offset = 0
     total_hits = None
     page_number = 1
-    max_pages = max(CORE_MAX_PAGES, 1)
-    max_online_papers = max(CORE_MAX_PAPERS, 1)
+    max_pages = max(int(os.getenv("CORE_MAX_PAGES", str(CORE_MAX_PAGES))), 1)
+    max_online_papers = max(int(os.getenv("CORE_MAX_PAPERS", str(CORE_MAX_PAPERS))), 1)
 
     # If two consecutive pages contain no relevant papers,
     # additional CORE results are unlikely to be useful for this report.
@@ -307,7 +307,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
     # Minimum fraction of query keywords that should appear in
     # the title/abstract/available text for a document to be considered
     # relevant enough for the expensive ML comparison.
-    relevance_threshold = 0.34
+    relevance_threshold = 0.25
 
     while True:
 
@@ -576,6 +576,8 @@ def analyze(
     student_name: str = Form(""),
     usn: str = Form(""),
     online: bool = Form(False),
+    previous_score: float | None = Form(None),
+    is_reanalysis: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     analysis_started = perf_counter()
@@ -680,6 +682,10 @@ def analyze(
 
     flagged = [m for m in sim_report.sentence_matches if m.flagged]
 
+    score_delta = None
+    if previous_score is not None:
+        score_delta = round(sim_report.overall_score - previous_score, 2)
+
     all_sentence_records = []
     for m in sim_report.sentence_matches:
         has_enough_words = len(m.sentence.split()) >= 8
@@ -740,6 +746,9 @@ def analyze(
         ],
         "all_sentences": all_sentence_records,
         "extracted_text": raw_text,
+        "is_reanalysis": is_reanalysis or (previous_score is not None),
+        "previous_score": previous_score,
+        "score_delta": score_delta,
     }
 
 

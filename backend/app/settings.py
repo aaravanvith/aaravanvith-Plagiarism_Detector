@@ -46,3 +46,9 @@ GEMINI_TIMEOUT = float(os.getenv("GEMINI_TIMEOUT", "30"))
 def get_gemini_api_key() -> str:
     """Return configured GEMINI_API_KEY securely from environment without logging."""
     return os.getenv("GEMINI_API_KEY", "").strip()
+
+
+def get_core_api_key() -> str:
+    """Return configured CORE_API_KEY securely from environment without logging."""
+    load_local_env()
+    return os.getenv("CORE_API_KEY", "").strip()

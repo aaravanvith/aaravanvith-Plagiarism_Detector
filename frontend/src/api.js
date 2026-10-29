@@ -1,4 +1,17 @@
-const BASE_URL = (import.meta.env.VITE_API_URL || "https://vidya-chaya-audit.onrender.com").replace(/\/+$/, "");
+function resolveBaseUrl() {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined" && window.location) {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host.endsWith(".local")) {
+      return `http://${host}:8000`;
+    }
+  }
+  return "https://vidya-chaya-audit.onrender.com";
+}
+
+const BASE_URL = resolveBaseUrl();
 let readiness = null;
 
 async function waitForBackend() {
@@ -55,10 +68,12 @@ async function handle(res) {
   return res.json();
 }
 
-export async function analyzeReport(file, onlineOrStudentName = false, usn = "", online = false) {
+export async function analyzeReport(file, onlineOrStudentName = false, usn = "", online = false, previousScore = null, isReanalysis = false) {
   let actualOnline = false;
   let actualStudentName = "";
   let actualUsn = "";
+  let actualPreviousScore = previousScore;
+  let actualIsReanalysis = isReanalysis;
 
   if (typeof onlineOrStudentName === "boolean") {
     actualOnline = onlineOrStudentName;
@@ -73,6 +88,12 @@ export async function analyzeReport(file, onlineOrStudentName = false, usn = "",
   form.append("student_name", actualStudentName);
   form.append("usn", actualUsn);
   form.append("online", actualOnline ? "true" : "false");
+  if (actualPreviousScore !== null && actualPreviousScore !== undefined) {
+    form.append("previous_score", String(actualPreviousScore));
+    form.append("is_reanalysis", "true");
+  } else if (actualIsReanalysis) {
+    form.append("is_reanalysis", "true");
+  }
 
   const res = await fetch(`${BASE_URL}/api/analyze`, {
     method: "POST",

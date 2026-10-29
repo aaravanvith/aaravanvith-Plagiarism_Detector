@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, Layers, ScanSearch } from "lucide-react";
+import { CheckCircle2, Download, Layers, RefreshCw, ScanSearch } from "lucide-react";
 import Header from "./components/Header";
 import UploadPanel from "./components/UploadPanel";
 import ScoreSeal from "./components/ScoreSeal";
@@ -12,17 +12,33 @@ import LandingPage from "./components/LandingPage";
 
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
-  useEffect(() => { const onPopState = () => setPath(window.location.pathname); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
+  useEffect(() => {
+    const onPopState = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   if (path !== "/analysis") return <LandingPage />;
   return <AnalysisWorkspace />;
 }
 
 function AnalysisWorkspace() {
   const [view, setView] = useState("analyze");
-  const [loading, setLoading] = useState(false), [error, setError] = useState(null), [result, setResult] = useState(null);
-  const [activeSentence, setActiveSentence] = useState(null), [uploadedFile, setUploadedFile] = useState(null);
-  const [appliedCorrections, setAppliedCorrections] = useState([]), [previewText, setPreviewText] = useState("");
-  const [autoCorrecting, setAutoCorrecting] = useState(false), [autoCorrectError, setAutoCorrectError] = useState(""), [autoCorrectSummary, setAutoCorrectSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [originalResult, setOriginalResult] = useState(null);
+  const [reanalysisResult, setReanalysisResult] = useState(null);
+  const [activeReportView, setActiveReportView] = useState("revised");
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeError, setReanalyzeError] = useState("");
+  const [lastAnalysisMode, setLastAnalysisMode] = useState(false);
+  const [activeSentence, setActiveSentence] = useState(null);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [appliedCorrections, setAppliedCorrections] = useState([]);
+  const [previewText, setPreviewText] = useState("");
+  const [autoCorrecting, setAutoCorrecting] = useState(false);
+  const [autoCorrectError, setAutoCorrectError] = useState("");
+  const [autoCorrectSummary, setAutoCorrectSummary] = useState(null);
 
   const handleAnalyze = async (file, online = false) => {
     setLoading(true);
@@ -30,10 +46,15 @@ function AnalysisWorkspace() {
     try {
       const res = await analyzeReport(file, online);
       setResult(res);
+      setOriginalResult(res);
+      setReanalysisResult(null);
+      setActiveReportView("revised");
+      setLastAnalysisMode(online);
       setActiveSentence(null);
       setUploadedFile(file);
       setAppliedCorrections([]);
       setAutoCorrectSummary(null);
+      setReanalyzeError("");
       setPreviewText(res.extracted_text || "");
     } catch (e) {
       setError(e.message || "Analysis failed. Please try again.");
@@ -41,28 +62,239 @@ function AnalysisWorkspace() {
       setLoading(false);
     }
   };
-  const applyCorrection = (correction) => setAppliedCorrections((current) => { const next = [...current.filter((item) => item.start_offset !== correction.start_offset), correction]; setPreviewText([...next].sort((a, b) => b.start_offset - a.start_offset).reduce((text, item) => text.slice(0, item.start_offset) + item.corrected + text.slice(item.end_offset), result?.extracted_text || "")); return next; });
-  const downloadCorrectedDocument = async () => { if (!appliedCorrections.length || !uploadedFile) { setAutoCorrectError("Select at least one correction first."); return; } setAutoCorrecting(true); setAutoCorrectError(""); setAutoCorrectSummary(null); try { const { blob, filename, summary } = await autoCorrectDocument(uploadedFile, appliedCorrections); setAutoCorrectSummary(summary); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); } catch (e) { setAutoCorrectError(e.message || "Could not generate the corrected report."); } finally { setAutoCorrecting(false); } };
+
+  const applyCorrection = (correction) =>
+    setAppliedCorrections((current) => {
+      const next = [...current.filter((item) => item.start_offset !== correction.start_offset), correction];
+      const baseText = originalResult?.extracted_text || result?.extracted_text || "";
+      setPreviewText(
+        [...next]
+          .sort((a, b) => b.start_offset - a.start_offset)
+          .reduce((text, item) => text.slice(0, item.start_offset) + item.corrected + text.slice(item.end_offset), baseText)
+      );
+      return next;
+    });
+
+  const handleReanalyze = async () => {
+    if (!appliedCorrections.length || !previewText) {
+      setReanalyzeError("Apply at least one correction before re-analyzing.");
+      return;
+    }
+    setReanalyzing(true);
+    setReanalyzeError("");
+    try {
+      const baseName = uploadedFile?.name ? uploadedFile.name.replace(/\.[^/.]+$/, "") : "report";
+      const correctedFilename = `corrected_${baseName}.txt`;
+      const correctedBlob = new Blob([previewText], { type: "text/plain" });
+      const correctedFile = new File([correctedBlob], correctedFilename, { type: "text/plain" });
+
+      const prevScore = originalResult ? originalResult.plagiarism_score : result?.plagiarism_score;
+      const res = await analyzeReport(correctedFile, lastAnalysisMode, "", false, prevScore, true);
+
+      setReanalysisResult(res);
+      setResult(res);
+      setActiveReportView("revised");
+      setActiveSentence(null);
+    } catch (e) {
+      setReanalyzeError(e.message || "Re-analysis failed. Please check your connection and try again.");
+    } finally {
+      setReanalyzing(false);
+    }
+  };
+
+  const toggleReportView = (viewType) => {
+    setActiveReportView(viewType);
+    if (viewType === "original" && originalResult) {
+      setResult(originalResult);
+    } else if (viewType === "revised" && reanalysisResult) {
+      setResult(reanalysisResult);
+    }
+  };
+
+  const downloadCorrectedDocument = async () => {
+    if (!appliedCorrections.length || !uploadedFile) {
+      setAutoCorrectError("Select at least one correction first.");
+      return;
+    }
+    setAutoCorrecting(true);
+    setAutoCorrectError("");
+    setAutoCorrectSummary(null);
+    try {
+      const { blob, filename, summary } = await autoCorrectDocument(uploadedFile, appliedCorrections);
+      setAutoCorrectSummary(summary);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      setAutoCorrectError(e.message || "Could not generate the corrected report.");
+    } finally {
+      setAutoCorrecting(false);
+    }
+  };
 
   const handleSelectSentence = (sentence) => {
-    // Only flagged sentences can be opened for correction
     if (sentence && sentence.flagged) {
       setActiveSentence(sentence);
     }
   };
 
-  return <div className="analysis-shell min-h-screen bg-paper app-grid"><Header view={view} setView={setView} /><main className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:ml-72 lg:px-10 lg:py-10">{view === "analyze" && <div className="grid gap-7 xl:grid-cols-[410px_minmax(0,1fr)]"><div className="space-y-6"><UploadPanel onAnalyze={handleAnalyze} loading={loading} error={error} />{!result && <div className="analysis-note rounded-xl border border-ink-100 bg-white p-6 text-sm leading-relaxed text-ink-500"><div className="mb-2 flex items-center gap-2 font-medium text-ink-800"><Layers className="h-4 w-4 text-seal-500" /> Vaidya Chaya Audit evidence layer</div>Review uses sentence-level evidence. The exact method shown in your results reflects the analysis returned by the platform.</div>}</div><div>{result ? <Results result={result} activeSentence={activeSentence} onSelectSentence={handleSelectSentence} corrections={appliedCorrections} preview={previewText} busy={autoCorrecting} autoError={autoCorrectError} summary={autoCorrectSummary} download={downloadCorrectedDocument} /> : <EmptyState />}</div></div>}{view === "history" && <HistoryTable />}{view === "repository" && <RepositoryPanel />}</main>{activeSentence && activeSentence.flagged && <><button aria-label="Close correction panel" className="fixed inset-0 z-40 bg-ink-900/20" onClick={() => setActiveSentence(null)} /><CorrectionPanel sentence={activeSentence} onClose={() => setActiveSentence(null)} onApply={applyCorrection} isApplied={appliedCorrections.some((item) => item.start_offset === activeSentence.start_offset)} appliedCorrection={appliedCorrections.find((item) => item.start_offset === activeSentence.start_offset)} /></>}</div>;
+  return (
+    <div className="analysis-shell min-h-screen bg-paper app-grid">
+      <Header view={view} setView={setView} />
+      <main className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:ml-72 lg:px-10 lg:py-10">
+        {view === "analyze" && (
+          <div className="grid gap-7 xl:grid-cols-[410px_minmax(0,1fr)]">
+            <div className="space-y-6">
+              <UploadPanel onAnalyze={handleAnalyze} loading={loading} error={error} />
+              {!result && (
+                <div className="analysis-note rounded-xl border border-ink-100 bg-white p-6 text-sm leading-relaxed text-ink-500">
+                  <div className="mb-2 flex items-center gap-2 font-medium text-ink-800">
+                    <Layers className="h-4 w-4 text-seal-500" /> Vaidya Chaya Audit evidence layer
+                  </div>
+                  Review uses sentence-level evidence. The exact method shown in your results reflects the analysis returned by the platform.
+                </div>
+              )}
+            </div>
+            <div>
+              {result ? (
+                <Results
+                  result={result}
+                  originalResult={originalResult}
+                  reanalysisResult={reanalysisResult}
+                  activeReportView={activeReportView}
+                  onToggleReportView={toggleReportView}
+                  activeSentence={activeSentence}
+                  onSelectSentence={handleSelectSentence}
+                  corrections={appliedCorrections}
+                  preview={previewText}
+                  busy={autoCorrecting}
+                  autoError={autoCorrectError}
+                  summary={autoCorrectSummary}
+                  download={downloadCorrectedDocument}
+                  reanalyzing={reanalyzing}
+                  reanalyzeError={reanalyzeError}
+                  onReanalyze={handleReanalyze}
+                />
+              ) : (
+                <EmptyState />
+              )}
+            </div>
+          </div>
+        )}
+        {view === "history" && <HistoryTable />}
+        {view === "repository" && <RepositoryPanel />}
+      </main>
+      {activeSentence && activeSentence.flagged && (
+        <>
+          <button aria-label="Close correction panel" className="fixed inset-0 z-40 bg-ink-900/20" onClick={() => setActiveSentence(null)} />
+          <CorrectionPanel
+            sentence={activeSentence}
+            onClose={() => setActiveSentence(null)}
+            onApply={applyCorrection}
+            isApplied={appliedCorrections.some((item) => item.start_offset === activeSentence.start_offset)}
+            appliedCorrection={appliedCorrections.find((item) => item.start_offset === activeSentence.start_offset)}
+          />
+        </>
+      )}
+    </div>
+  );
 }
 
-function Results({ result, activeSentence, onSelectSentence, corrections, preview, busy, autoError, summary, download }) {
+function Results({
+  result,
+  originalResult,
+  reanalysisResult,
+  activeReportView,
+  onToggleReportView,
+  activeSentence,
+  onSelectSentence,
+  corrections,
+  preview,
+  busy,
+  autoError,
+  summary,
+  download,
+  reanalyzing,
+  reanalyzeError,
+  onReanalyze,
+}) {
   return (
     <div className="space-y-6">
+      {reanalysisResult && originalResult && (
+        <section className="rounded-xl border border-seal-200 bg-gradient-to-r from-seal-50/60 to-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-seal-100 px-2.5 py-0.5 text-xs font-semibold text-seal-800">
+                  Re-analysis comparison
+                </span>
+                {reanalysisResult.score_delta !== null && reanalysisResult.score_delta !== undefined && (
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      reanalysisResult.score_delta < 0
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                        : reanalysisResult.score_delta === 0
+                        ? "bg-ink-100 text-ink-700 border border-ink-200"
+                        : "bg-amber-100 text-amber-800 border border-amber-300"
+                    }`}
+                  >
+                    {reanalysisResult.score_delta < 0
+                      ? `▼ ${Math.abs(reanalysisResult.score_delta).toFixed(1)}% reduction in similarity`
+                      : reanalysisResult.score_delta === 0
+                      ? "0.0% change in similarity"
+                      : `▲ +${reanalysisResult.score_delta.toFixed(1)}% change`}
+                  </span>
+                )}
+              </div>
+              <h3 className="font-display text-lg text-ink-900">
+                Plagiarism Recalculation: {originalResult.plagiarism_score}% → {reanalysisResult.plagiarism_score}%
+              </h3>
+              <p className="text-sm text-ink-600">
+                Flagged sentences reduced from {originalResult.flagged_sentence_count} to {reanalysisResult.flagged_sentence_count} across {reanalysisResult.total_sources_compared} compared sources.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white p-1">
+              <button
+                type="button"
+                onClick={() => onToggleReportView("revised")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  activeReportView === "revised"
+                    ? "bg-seal-600 text-white shadow-sm"
+                    : "text-ink-600 hover:text-ink-900"
+                }`}
+              >
+                Revised Report ({reanalysisResult.plagiarism_score}%)
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleReportView("original")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  activeReportView === "original"
+                    ? "bg-ink-800 text-white shadow-sm"
+                    : "text-ink-600 hover:text-ink-900"
+                }`}
+              >
+                Original Report ({originalResult.plagiarism_score}%)
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="rounded-xl border border-ink-100 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,48,.04)] sm:p-8">
         <div className="flex flex-col items-center gap-8 sm:flex-row">
           <ScoreSeal score={result.plagiarism_score} verdict={result.verdict} />
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">Analysis complete</p>
+              <p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">
+                {result.is_reanalysis ? "Re-analyzed report" : "Analysis complete"}
+              </p>
               {result.analysis_mode && (
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                   result.analysis_mode === "online" && result.online_sources_compared > 0
@@ -89,7 +321,11 @@ function Results({ result, activeSentence, onSelectSentence, corrections, previe
                 </span>
               )}
             </p>
-            <p className="mt-3 text-xs text-ink-400">{result.similarity_method?.semantic_available ? "Hybrid score: TF-IDF, cosine similarity, and semantic similarity." : "TF-IDF cosine scoring is active. Semantic scoring is unavailable or disabled."}</p>
+            <p className="mt-3 text-xs text-ink-400">
+              {result.similarity_method?.semantic_available
+                ? "Hybrid score: TF-IDF, cosine similarity, and semantic similarity."
+                : "TF-IDF cosine scoring is active. Semantic scoring is unavailable or disabled."}
+            </p>
           </div>
         </div>
       </section>
@@ -105,20 +341,39 @@ function Results({ result, activeSentence, onSelectSentence, corrections, previe
       />
 
       <section className="rounded-xl border border-ink-100 bg-white p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-seal-500" />
               <h3 className="font-display text-lg text-ink-900">Corrected Report</h3>
             </div>
             <p className="text-sm text-ink-500">
-              {corrections.length} selected correction{corrections.length === 1 ? "" : "s"}. Open a flagged sentence, review the source passage, then click Apply to include its rewrite in the download. PDF exports contain extracted text and do not preserve the original images or layout.
+              {corrections.length} selected correction{corrections.length === 1 ? "" : "s"}. Open a flagged sentence, review the source passage, then click Apply to include its rewrite. Once applied, click &ldquo;Re-analyze Corrected Report&rdquo; to recalculate actual plagiarism similarity.
             </p>
           </div>
-          <button type="button" disabled={busy || !corrections.length} onClick={download} className="rounded-md bg-ink-800 px-4 py-2 text-sm font-semibold text-white hover:bg-ink-900 disabled:opacity-40">
-            <Download className="mr-2 inline h-4 w-4" />{busy ? "Generating corrected report..." : "Generate Corrected Report"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={reanalyzing || !corrections.length}
+              onClick={onReanalyze}
+              className="inline-flex items-center rounded-md border border-seal-600 bg-seal-50 px-4 py-2 text-sm font-semibold text-seal-700 hover:bg-seal-100 disabled:opacity-40"
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${reanalyzing ? "animate-spin" : ""}`} />
+              {reanalyzing ? "Re-analyzing..." : "Re-analyze Corrected Report"}
+            </button>
+            <button
+              type="button"
+              disabled={busy || !corrections.length}
+              onClick={download}
+              className="inline-flex items-center rounded-md bg-ink-800 px-4 py-2 text-sm font-semibold text-white hover:bg-ink-900 disabled:opacity-40"
+            >
+              <Download className="mr-2 inline h-4 w-4" />
+              {busy ? "Generating report..." : "Generate Corrected Report"}
+            </button>
+          </div>
         </div>
+        {reanalyzing && <p className="mt-3 text-sm text-seal-600">Re-analyzing corrected report through similarity pipeline...</p>}
+        {reanalyzeError && <p role="alert" className="mt-3 text-sm text-risk-high">{reanalyzeError}</p>}
         {busy && <p className="mt-3 text-sm text-ink-500">Generating corrected report...</p>}
         {autoError && <p role="alert" className="mt-3 text-sm text-risk-high">{autoError}</p>}
         {summary && (

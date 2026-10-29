@@ -7,6 +7,7 @@ database: imported documents are stored in the local repository first.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from urllib.parse import urlencode
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from ..settings import CORE_API_KEY, CORE_API_URL
+from ..settings import CORE_API_URL, load_local_env
 
 _lock = threading.Lock()
 _last_request_at = 0.0
@@ -38,8 +39,13 @@ class CoreWork:
     doi: str = ""
 
 
+def _api_key() -> str:
+    load_local_env()
+    return os.getenv("CORE_API_KEY", "").strip()
+
+
 def configured() -> bool:
-    return bool(CORE_API_KEY)
+    return bool(_api_key())
 
 
 def _rate_limit() -> None:
@@ -80,7 +86,7 @@ def search_works(
     request = Request(
         f"{CORE_API_URL}?{params}",
         headers={
-            "Authorization": f"Bearer {CORE_API_KEY}",
+            "Authorization": f"Bearer {_api_key()}",
             "Accept": "application/json",
             "User-Agent": "VTU-Plagiarism-Detector/1.0",
         },
