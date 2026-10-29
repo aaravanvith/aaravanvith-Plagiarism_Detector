@@ -16,6 +16,9 @@ from urllib.request import Request, urlopen
 
 from . import gemini_client
 from .ollama_client import ollama_rewrite
+from ..settings import load_local_env
+
+load_local_env()
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +123,64 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
     """Generate 3–5 full-sentence structural candidates, never token swaps."""
     ending, core = _ending(sentence), _core(sentence)
     candidates: list[str] = []
+
+    # 1. Contrastive clauses: e.g. "Clause1, whereas/while/although Clause2"
+    contrastive = re.match(
+        r"^(?P<c1>.+?),\s*(?P<conj>whereas|while|whilst|although|in contrast to which)\s+(?P<c2>.+)$",
+        core,
+        re.I,
+    )
+    if contrastive:
+        c1 = contrastive.group("c1").strip()
+        c2 = contrastive.group("c2").strip()
+        c1_low = c1[0].lower() + c1[1:] if not c1[:2].isupper() else c1
+        c2_low = c2[0].lower() + c2[1:] if not c2[:2].isupper() else c2
+        c1_cap = c1[0].upper() + c1[1:]
+        c2_cap = c2[0].upper() + c2[1:]
+
+        if mode == "academic":
+            candidates.append(_sentence(f"While {c2_low}, {c1_low}", ending))
+            candidates.append(_sentence(f"{c1_cap}; in contrast, {c2_low}", ending))
+            candidates.append(_sentence(f"Whereas {c2_low}, {c1_low}", ending))
+            return candidates
+        elif mode == "human":
+            candidates.append(_sentence(f"Although {c2_low}, {c1_low}", ending))
+            candidates.append(_sentence(f"{c1_cap}, though {c2_low}", ending))
+            candidates.append(_sentence(f"While {c1_low}, {c2_low}", ending))
+            return candidates
+        else:  # simple
+            candidates.append(_sentence(f"{c2_cap}. In comparison, {c1_low}", ending))
+            candidates.append(_sentence(f"{c1_cap}. In contrast, {c2_low}", ending))
+            candidates.append(_sentence(f"{c1_cap}, but {c2_low}", ending))
+            return candidates
+
+    # 2. Coordinate clauses: e.g. "Clause1, and Clause2"
+    coord = re.match(
+        r"^(?P<c1>.+?),\s*and\s+(?P<c2>.+)$",
+        core,
+        re.I,
+    )
+    if coord:
+        c1 = coord.group("c1").strip()
+        c2 = coord.group("c2").strip()
+        c1_low = c1[0].lower() + c1[1:] if not c1[:2].isupper() else c1
+        c2_low = c2[0].lower() + c2[1:] if not c2[:2].isupper() else c2
+        c1_cap = c1[0].upper() + c1[1:]
+        c2_cap = c2[0].upper() + c2[1:]
+
+        if mode == "academic":
+            candidates.append(_sentence(f"In conjunction with {c1_low}, {c2_low}", ending))
+            candidates.append(_sentence(f"{c1_cap}; additionally, {c2_low}", ending))
+            return candidates
+        elif mode == "human":
+            candidates.append(_sentence(f"Along with {c1_low}, {c2_low}", ending))
+            candidates.append(_sentence(f"{c2_cap}, and {c1_low}", ending))
+            return candidates
+        else:  # simple
+            candidates.append(_sentence(f"{c1_cap}. Also, {c2_low}", ending))
+            candidates.append(_sentence(f"Both {c1_low} and {c2_low}", ending))
+            return candidates
+
     parsed = _split_clause(sentence)
     if parsed:
         subject, verb, obj = parsed
@@ -180,7 +241,7 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
             _sentence(f"{relative.group('intro')} is designed around {relative.group('detail')}", ending),
         ])
 
-    prep = re.match(r"^(?P<main>.+?)\s+(?P<prep>using|through|via|with|during|in|for)\s+(?P<detail>[^.!?]+)$", core, re.I)
+    prep = re.match(r"^(?P<main>.+?)\s+(?P<prep>using|through|via)\s+(?P<detail>[^.!?]+)$", core, re.I)
     if prep:
         main, link, detail = prep.group("main"), prep.group("prep").lower(), prep.group("detail")
         main_lower = main[0].lower() + main[1:]
@@ -193,17 +254,6 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
         else:
             candidates.append(_sentence(f"{link.capitalize()} {detail}, {main_lower}", ending))
             candidates.append(_sentence(f"Using {detail}, {main_lower}", ending))
-
-    core_lower = core[0].lower() + core[1:]
-    if mode == "academic":
-        candidates.append(_sentence(f"In this investigation, {core_lower}", ending))
-        candidates.append(_sentence(f"Experimental evidence indicates that {core_lower}", ending))
-    elif mode == "human":
-        candidates.append(_sentence(f"In practical terms, {core_lower}", ending))
-        candidates.append(_sentence(f"From our observations, {core_lower}", ending))
-    else:
-        candidates.append(_sentence(f"Overall, {core_lower}", ending))
-        candidates.append(_sentence(f"In short, {core_lower}", ending))
 
     return candidates
 
@@ -226,19 +276,14 @@ def _valid_candidate(original: str, candidate: str) -> bool:
 
 
 def _too_similar(first: str, second: str) -> bool:
-    sequence = SequenceMatcher(None, first.lower(), second.lower()).ratio()
-    first_words, second_words = set(_tokens(first)), set(_tokens(second))
-    lexical = len(first_words & second_words) / max(1, len(first_words | second_words))
-    return sequence > 0.70 or lexical > 0.70
+    if not first or not second:
+        return False
+    if first.strip().lower() == second.strip().lower():
+        return True
+    return SequenceMatcher(None, first.lower(), second.lower()).ratio() > 0.88
 
 
-def _textual_similarity(first: str, second: str) -> float:
-    """Token-set similarity used for the stricter Human/Simple guard."""
-    first_words, second_words = set(_tokens(first)), set(_tokens(second))
-    return len(first_words & second_words) / max(1, len(first_words | second_words))
-
-
-def _best_offline_rewrite(sentence: str, mode: str, strength: str, avoid: list[str] | None = None) -> str:
+def _best_offline_rewrite(sentence: str, mode: str, strength: str, avoid: list[str] | None = None) -> str | None:
     candidates = [item for item in _offline_candidates(sentence, mode) if _valid_candidate(sentence, item)]
     avoid = avoid or []
     distinct = [item for item in candidates if not any(_too_similar(item, prior) for prior in avoid)]
@@ -247,34 +292,33 @@ def _best_offline_rewrite(sentence: str, mode: str, strength: str, avoid: list[s
         if strength in {"strong", "maximum"}:
             return min(choices, key=lambda item: SequenceMatcher(None, _tokens(sentence), _tokens(item)).ratio())
         return max(choices, key=lambda item: _candidate_score(sentence, item))
-    core = _core(sentence)
-    ending = _ending(sentence)
-    core_lower = core[0].lower() + core[1:]
-    if mode == "academic":
-        return _sentence(f"In this context, {core_lower}", ending)
-    if mode == "human":
-        return _sentence(f"In practical terms, {core_lower}", ending)
-    return _sentence(f"Overall, {core_lower}", ending)
+    return None
 
 
 _MODE_INSTRUCTIONS = {
     "academic": (
-        "You are an IEEE research-paper editor. Rewrite this single sentence in formal academic prose using "
-        "advanced vocabulary and complete syntactic restructuring (passive/objective framing encouraged). "
-        "Preserve all scientific facts, medical terminology, acronyms, and conclusions exactly. "
+        "You are an IEEE and biomedical research-paper editor. Rewrite this single sentence in formal, publication-ready academic English. "
+        "You MUST syntactically restructure the sentence (for example, by inverting clauses, using formal contrastive markers, "
+        "or converting voice). Do NOT return the sentence unchanged or identical to the original. "
+        "Do NOT prepend filler phrases like 'The subject addressed in this report', 'In this context', or 'In this investigation'. "
+        "Preserve all scientific facts, medical terminology, acronyms, diagnoses, and numbers accurately. "
         "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
     ),
     "human": (
-        "You are a university student. Rewrite this single sentence in natural, fluent, conversational active voice. "
-        "Restructure the ideas and clauses so the sentence sounds independently composed. "
-        "Preserve all scientific facts, medical terminology, acronyms, and conclusions exactly. "
+        "You are a university student writing a research paper in your own authentic, fluent voice. "
+        "Rewrite this single sentence in natural, conversational active voice appropriate for an academic report. "
+        "You MUST reorder or restructure the clauses so it sounds independently composed in your own words. "
+        "Do NOT return the sentence unchanged, and do NOT use generic prefixes like 'In practical terms' or 'From our observations'. "
+        "Preserve all scientific facts, medical terminology, acronyms, diagnoses, and numbers accurately. "
         "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
     ),
     "simple": (
-        "You write for school-level readers. Rewrite this single sentence using clear, easy everyday English "
-        "and a direct sentence structure. Do not return the sentence unchanged or identical to the original. "
-        "Preserve all scientific facts, medical terminology, acronyms, and conclusions accurately. "
-        "Return ONLY the single rewritten sentence without preamble, explanations, numbering, or quotation marks."
+        "You are writing an educational guide for students and general readers. "
+        "Rewrite this single sentence in plain, clear, everyday English with direct and simple sentence structure. "
+        "You may break complex compound ideas into two short sentences if helpful. "
+        "Do NOT return the sentence unchanged, and do NOT use robotic prefixes like 'Overall' or 'In short'. "
+        "Preserve all essential scientific facts, medical terminology, acronyms, diagnoses, and numbers accurately. "
+        "Return ONLY the single rewritten sentence (or two short sentences) without preamble, explanations, numbering, or quotation marks."
     ),
 }
 
@@ -317,7 +361,8 @@ def _gemini_client():
 
 def _rewrite_prompt(sentence: str, mode: str, strength: str, avoid: str = "") -> str:
     prompt = (
-        f"{_MODE_INSTRUCTIONS[mode]}\n"
+        f"{_MODE_INSTRUCTIONS[mode]}\n\n"
+        f"Target Mode: {mode.upper()}\n"
         f"Rewrite strength: {strength}. Maintain precision: preserve all medical terms, acronyms, and scientific conclusions. "
         "Do not use conversational filler (such as 'In other words'). Return ONLY the single rewritten sentence.\n"
         f"Original sentence: {sentence}"
@@ -376,7 +421,9 @@ def rewrite_suggestions(
     sentence: str,
     strength: str = "moderate",
     return_provider: bool = False,
-) -> dict[str, str] | tuple[dict[str, str], str]:
+    return_error: bool = False,
+    mode: str | None = None,
+) -> dict[str, str] | tuple[dict[str, str], str] | tuple[dict[str, str], str, str | None]:
     """Create independent, validated mode outputs for instant client-side tabs.
 
     Provider hierarchy:
@@ -389,66 +436,58 @@ def rewrite_suggestions(
 
     rewrites: dict[str, str] = {}
     provider_used = "offline"
+    error_message: str | None = None
 
-    for mode in _MODES:
-        avoid = rewrites.get("human", "") if mode == "simple" else ""
+    for m in _MODES:
+        avoid = rewrites.get("human", "") if m == "simple" else (rewrites.get("academic", "") if m == "human" else "")
         candidate = None
         mode_provider = "offline"
 
         # 1. Primary provider: Gemini API
         if gemini_client.configured():
-            candidate = _gemini_rewrite(sentence, mode, strength, avoid)
-            if candidate:
-                mode_provider = "gemini"
+            try:
+                candidate = _gemini_rewrite(sentence, m, strength, avoid)
+                if candidate:
+                    mode_provider = "gemini"
+            except Exception as exc:
+                error_message = f"Gemini error: {exc}"
 
         # 2. Secondary provider: OpenAI if configured
         if not candidate and os.getenv("OPENAI_API_KEY"):
-            candidate = _openai_rewrite(sentence, mode, strength, avoid)
+            candidate = _openai_rewrite(sentence, m, strength, avoid)
             if candidate:
                 mode_provider = "openai"
 
         # 3. Tertiary provider: Local Ollama
         if not candidate:
-            candidate = ollama_rewrite(sentence, mode, strength, avoid)
+            candidate = ollama_rewrite(sentence, m, strength, avoid)
             if candidate:
                 mode_provider = "ollama"
 
-        # Dedicated Simple mode similarity guard against human mode
-        if (
-            mode == "simple"
-            and candidate
-            and "human" in rewrites
-            and _textual_similarity(candidate, rewrites["human"]) > 0.60
-        ):
-            avoid_instruction = f"{rewrites['human']} Previous Simple attempt was too similar; use a new sentence pattern."
-            new_cand = None
-            if gemini_client.configured():
-                new_cand = _gemini_rewrite(sentence, mode, strength, avoid_instruction)
-            if not new_cand and os.getenv("OPENAI_API_KEY"):
-                new_cand = _openai_rewrite(sentence, mode, strength, avoid_instruction)
-            if not new_cand:
-                new_cand = ollama_rewrite(sentence, mode, strength, avoid_instruction)
-            if new_cand:
-                candidate = new_cand
-
-        # Validate diversity and guard thresholds
-        if candidate and mode == "simple" and "human" in rewrites and _textual_similarity(candidate, rewrites["human"]) > 0.60:
-            candidate = None
-            mode_provider = "offline"
+        # If LLM candidate is too similar to another mode, attempt once with explicit avoidance
         if candidate and any(_too_similar(candidate, prior) for prior in rewrites.values()):
-            candidate = None
-            mode_provider = "offline"
+            if gemini_client.configured():
+                alt_cand = _gemini_rewrite(sentence, m, strength, avoid=f"{avoid} Use a completely different clause order or syntax.")
+                if alt_cand and not any(_too_similar(alt_cand, prior) for prior in rewrites.values()):
+                    candidate = alt_cand
 
         # 4. Final deterministic structural fallback
         if not candidate:
-            candidate = _best_offline_rewrite(sentence, mode, strength, list(rewrites.values()))
-            mode_provider = "offline"
+            candidate = _best_offline_rewrite(sentence, m, strength, list(rewrites.values()))
+            if candidate:
+                mode_provider = "offline"
 
-        if mode_provider != "offline":
-            provider_used = mode_provider
+        if candidate:
+            rewrites[m] = candidate
+            if mode_provider != "offline":
+                provider_used = mode_provider
+        else:
+            rewrites[m] = ""
+            if not error_message:
+                error_message = f"Could not generate an independent {m} rewrite without altering scientific meaning."
 
-        rewrites[mode] = candidate
-
+    if return_provider and return_error:
+        return rewrites, provider_used, error_message
     if return_provider:
         return rewrites, provider_used
     return rewrites
@@ -470,14 +509,35 @@ def suggest_citation(source_name: str, style: str = "APA") -> str:
     return f"Author, A. A. (n.d.). {source_name}. Source document."
 
 
-def correct_sentence(sentence: str, source_name: str, score: float, seed: int = 0, strength: str = "moderate") -> dict:
-    rewrites, provider = rewrite_suggestions(sentence, strength=strength, return_provider=True)
+def correct_sentence(
+    sentence: str,
+    source_name: str,
+    score: float,
+    seed: int = 0,
+    strength: str = "moderate",
+    mode: str = "academic",
+) -> dict:
+    selected_mode = mode.lower().strip() if mode and mode.lower().strip() in _MODES else "academic"
+    rewrites, provider, error = rewrite_suggestions(
+        sentence,
+        strength=strength,
+        return_provider=True,
+        return_error=True,
+        mode=selected_mode,
+    )
+    primary_rewrite = rewrites.get(selected_mode) or rewrites.get("academic") or ""
+
+    if not primary_rewrite or primary_rewrite.strip().lower() == sentence.strip().lower():
+        error = error or f"Failed to generate an independent {selected_mode} rewrite."
+
     return {
         "original": sentence,
-        "rewritten": rewrites["academic"],  # Existing consumers retain this default.
+        "rewritten": primary_rewrite,
+        "mode": selected_mode,
         "rewrites": rewrites,
         "provider": provider,
         "is_fallback": provider == "offline",
+        "error": error if not primary_rewrite else None,
         "explanation": explain_flag(sentence, source_name, score),
         "citation_apa": suggest_citation(source_name, "APA"),
         "citation_ieee": suggest_citation(source_name, "IEEE"),
@@ -485,7 +545,9 @@ def correct_sentence(sentence: str, source_name: str, score: float, seed: int = 
 
 
 def _chat_rewrite(context: dict) -> str:
-    return f'Academic rewrite: "{rewrite_suggestions(context["sentence"])["academic"]}"'
+    res = rewrite_suggestions(context["sentence"])
+    rewrite = res.get("academic") or res.get("human") or context["sentence"]
+    return f'Academic rewrite: "{rewrite}"'
 
 
 CHAT_TEMPLATES = [

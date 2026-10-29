@@ -750,12 +750,19 @@ class CorrectRequest(BaseModel):
     rewrite_strength: str = "moderate"
     start_offset: int | None = None
     end_offset: int | None = None
+    mode: str = "academic"
 
 
 @app.post("/api/correct")
 def correct(req: CorrectRequest):
     try:
-        response = ca.correct_sentence(req.sentence, req.matched_source, req.similarity, strength=req.rewrite_strength)
+        response = ca.correct_sentence(
+            req.sentence,
+            req.matched_source,
+            req.similarity,
+            strength=req.rewrite_strength,
+            mode=req.mode,
+        )
         response["start_offset"] = req.start_offset
         response["end_offset"] = req.end_offset
         return response

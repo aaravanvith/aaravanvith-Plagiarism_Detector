@@ -18,12 +18,22 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied,
     setCorrection(null);
     setLoading(true);
     setMessages([]);
-    setRewriteMode("academic");
     setRequestError("");
-    correctSentence(sentence.sentence, sentence.matched_source, sentence.similarity, rewriteStrength, sentence.start_offset, sentence.end_offset)
+    correctSentence(
+      sentence.sentence,
+      sentence.matched_source,
+      sentence.similarity,
+      rewriteStrength,
+      sentence.start_offset,
+      sentence.end_offset,
+      "academic",
+    )
       .then((res) => {
         if (cancelled) return;
         setCorrection(res);
+        if (res.error) {
+          setRequestError(res.error);
+        }
         setMessages([
           { from: "agent", text: sentence.flagged ? res.explanation : "This sentence is below the similarity flag threshold. You can still review and apply a suggested rewrite." },
         ]);
@@ -132,31 +142,57 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied,
                   </span>
                 )}
               </div>
-              <p role="tabpanel" aria-live="polite" key={rewriteMode} className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
-                {correction.rewrites?.[rewriteMode] || correction.rewritten}
-              </p>
-              <button
-                type="button"
-                disabled={loading || !Number.isInteger(correction.start_offset) || correction.end_offset <= correction.start_offset}
-                onClick={() => onApply({
-                  original: correction.original,
-                  corrected: correction.rewrites?.[rewriteMode] || correction.rewritten,
-                  start_offset: correction.start_offset,
-                  end_offset: correction.end_offset,
-                  mode: rewriteMode,
-                })}
-                className={`mt-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  appliedCorrection && appliedCorrection.corrected === (correction.rewrites?.[rewriteMode] || correction.rewritten)
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                    : "bg-seal-500 text-white hover:bg-seal-600"
-                }`}
-              >
-                {appliedCorrection && appliedCorrection.corrected === (correction.rewrites?.[rewriteMode] || correction.rewritten)
-                  ? `Applied to document (${rewriteMode} version)`
-                  : isApplied
-                    ? `Update with ${rewriteMode} version`
-                    : "Apply corrected sentence"}
-              </button>
+              {(() => {
+                const currentRewrite = correction.rewrites?.[rewriteMode] || (correction.mode === rewriteMode ? correction.rewritten : "") || "";
+                const isIdentical = Boolean(currentRewrite && sentence?.sentence && currentRewrite.trim().toLowerCase() === sentence.sentence.trim().toLowerCase());
+                const hasError = !currentRewrite || isIdentical || Boolean(correction.error && !currentRewrite);
+                const isCurrentApplied = Boolean(appliedCorrection && appliedCorrection.corrected === currentRewrite);
+
+                let buttonLabel = "Apply corrected sentence";
+                if (isCurrentApplied) {
+                  buttonLabel = `Applied to document (${rewriteMode} version)`;
+                } else if (rewriteMode === "human") {
+                  buttonLabel = "Update with human version";
+                } else if (rewriteMode === "simple") {
+                  buttonLabel = "Update with simple version";
+                } else if (rewriteMode === "academic") {
+                  buttonLabel = isApplied ? "Update with academic version" : "Apply corrected sentence";
+                }
+
+                return (
+                  <>
+                    {hasError ? (
+                      <div role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">
+                        {correction.error || (isIdentical
+                          ? `Unable to generate a sufficiently distinct ${rewriteMode} rewrite without altering clinical facts.`
+                          : `Generating ${rewriteMode} rewrite failed. Please try again.`)}
+                      </div>
+                    ) : (
+                      <p role="tabpanel" aria-live="polite" key={rewriteMode} className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">
+                        {currentRewrite}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={loading || hasError || !Number.isInteger(correction.start_offset) || correction.end_offset <= correction.start_offset}
+                      onClick={() => onApply({
+                        original: correction.original,
+                        corrected: currentRewrite,
+                        start_offset: correction.start_offset,
+                        end_offset: correction.end_offset,
+                        mode: rewriteMode,
+                      })}
+                      className={`mt-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        isCurrentApplied
+                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                          : "bg-seal-500 text-white hover:bg-seal-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      }`}
+                    >
+                      {buttonLabel}
+                    </button>
+                  </>
+                );
+              })()}
             </Section>
 
             <Section title="Citation guidance" icon={<Quote className="h-3.5 w-3.5" />}>
