@@ -163,9 +163,9 @@ export default function CorrectionPanel({ sentence, onClose, onApply, isApplied,
                   <>
                     {hasError ? (
                       <div role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">
-                        {correction.error || (isIdentical
+                        {correction.mode_errors?.[rewriteMode] || (correction.mode === rewriteMode ? correction.error : null) || (isIdentical
                           ? `Unable to generate a sufficiently distinct ${rewriteMode} rewrite without altering clinical facts.`
-                          : `Generating ${rewriteMode} rewrite failed. Please try again.`)}
+                          : `Could not generate an independent ${rewriteMode} rewrite without altering scientific meaning.`)}
                       </div>
                     ) : (
                       <p role="tabpanel" aria-live="polite" key={rewriteMode} className="text-sm text-ink-800 bg-risk-lowBg rounded-md p-3">

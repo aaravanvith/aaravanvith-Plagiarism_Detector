@@ -1,8 +1,28 @@
 import os
+import time
 import requests
+
+_LAST_OLLAMA_CHECK = 0.0
+_OLLAMA_AVAILABLE = True
+
+
+def _is_ollama_reachable() -> bool:
+    global _LAST_OLLAMA_CHECK, _OLLAMA_AVAILABLE
+    now = time.time()
+    if now - _LAST_OLLAMA_CHECK < 60.0:
+        return _OLLAMA_AVAILABLE
+    _LAST_OLLAMA_CHECK = now
+    try:
+        r = requests.get("http://127.0.0.1:11434/api/tags", timeout=0.2)
+        _OLLAMA_AVAILABLE = (r.status_code == 200)
+    except Exception:
+        _OLLAMA_AVAILABLE = False
+    return _OLLAMA_AVAILABLE
 
 
 def ollama_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") -> str | None:
+    if not _is_ollama_reachable():
+        return None
     model = os.getenv("OLLAMA_MODEL", "gemma2:2b")
 
     prompts = {
@@ -44,7 +64,7 @@ def ollama_rewrite(sentence: str, mode: str, strength: str, avoid: str = "") -> 
 
     try:
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            "http://127.0.0.1:11434/api/generate",
             json={
                 "model": model,
                 "prompt": prompt,
