@@ -765,7 +765,8 @@ def _offline_candidates(sentence: str, mode: str) -> list[str]:
     # 0c. Short Heading or Title phrase (<= 8 words without terminal punctuation / finite verbs)
     tokens = _tokens(core)
     has_finite_verb = bool(re.search(r"\b(?:is|are|was|were|has|have|had|causes?|shows?|indicates?|occurs?|leads?|includes?|controls?|contains?|covers?|correlates?)\b", core, re.I))
-    is_heading_title = not sentence.strip().endswith((".", "!", "?")) and not re.search(r"^\d{3,}", core)
+    heading_text = sentence.strip().rstrip(".!?").strip()
+    is_heading_title = bool(heading_text) and not re.search(r"^\d{3,}", core) 
     if is_heading_title and len(tokens) <= 8 and not has_finite_verb:
         what_m = re.match(r"^(?:[0-9]+\.\s*)?What\s+(?P<topic>.+?)\s+Is$", core, re.I)
         if what_m:
