@@ -16,11 +16,7 @@ echo Both services are starting in separate windows.
 echo - Backend:  http://127.0.0.1:8001
 echo - Frontend: http://localhost:5173
 echo.
-echo OFFLINE MODE:
-echo Works 100%% offline using 473 local healthcare reference documents.
-echo Perfect for VTU project review demo even with Wi-Fi disconnected.
-echo.
-echo ONLINE MODE:
-echo Retrieves up to 15 relevant academic papers from CORE API
-echo when CORE_API_KEY is configured in backend/.env.
+echo ONLINE ACADEMIC INTEGRITY ANALYSIS:
+echo Retrieves relevant peer-reviewed academic papers dynamically
+echo from global repositories via CORE API using configured credentials.
 echo ========================================================

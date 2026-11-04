@@ -4,7 +4,6 @@ import { FileText, Loader2, UploadCloud, X } from "lucide-react";
 export default function UploadPanel({ onAnalyze, loading, error }) {
   const [file, setFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
-  const [online, setOnline] = useState(false);
 
   const inputRef = useRef(null);
 
@@ -12,7 +11,7 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
     e.preventDefault();
 
     if (file) {
-      onAnalyze(file, online);
+      onAnalyze(file);
     }
   };
 
@@ -26,45 +25,8 @@ export default function UploadPanel({ onAnalyze, loading, error }) {
       </h2>
 
       <p className="text-sm text-ink-400 mb-6">
-        Analyze your healthcare or engineering report for plagiarism.
+        Analyze your healthcare or engineering report for plagiarism against online academic sources.
       </p>
-
-      {/* Analysis Mode */}
-      <div className="mb-6">
-        <label className="block text-xs font-medium text-ink-400 uppercase tracking-wide mb-2">
-          Analysis mode
-        </label>
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* Offline */}
-          <button
-            type="button"
-            onClick={() => setOnline(false)}
-            className={`rounded-md border px-4 py-3 text-left transition ${
-              !online
-                ? "border-seal-500 bg-seal-400/10"
-                : "border-ink-100 hover:border-ink-300"
-            }`}
-          >
-            <p className="text-sm font-semibold text-ink-800">Offline</p>
-            <p className="mt-1 text-xs text-ink-400">Local Repository</p>
-          </button>
-
-          {/* Online */}
-          <button
-            type="button"
-            onClick={() => setOnline(true)}
-            className={`rounded-md border px-4 py-3 text-left transition ${
-              online
-                ? "border-seal-500 bg-seal-400/10"
-                : "border-ink-100 hover:border-ink-300"
-            }`}
-          >
-            <p className="text-sm font-semibold text-ink-800">Online</p>
-            <p className="mt-1 text-xs text-ink-400">Online Academic Search</p>
-          </button>
-        </div>
-      </div>
 
       {/* File Upload */}
       <div

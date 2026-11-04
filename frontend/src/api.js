@@ -106,26 +106,22 @@ async function handle(res) {
   return res.json();
 }
 
-export async function analyzeReport(file, onlineOrStudentName = false, usn = "", online = false, previousScore = null, isReanalysis = false) {
-  let actualOnline = false;
+export async function analyzeReport(file, onlineOrStudentName = false, usn = "", _online = false, previousScore = null, isReanalysis = false) {
   let actualStudentName = "";
   let actualUsn = "";
-  let actualPreviousScore = previousScore;
-  let actualIsReanalysis = isReanalysis;
+  const actualPreviousScore = previousScore;
+  const actualIsReanalysis = isReanalysis;
 
-  if (typeof onlineOrStudentName === "boolean") {
-    actualOnline = onlineOrStudentName;
-  } else {
+  if (typeof onlineOrStudentName !== "boolean") {
     actualStudentName = onlineOrStudentName || "";
     actualUsn = usn || "";
-    actualOnline = Boolean(online);
   }
 
   const form = new FormData();
   form.append("file", file);
   form.append("student_name", actualStudentName);
   form.append("usn", actualUsn);
-  form.append("online", actualOnline ? "true" : "false");
+  form.append("online", "true");
   if (actualPreviousScore !== null && actualPreviousScore !== undefined) {
     form.append("previous_score", String(actualPreviousScore));
     form.append("is_reanalysis", "true");

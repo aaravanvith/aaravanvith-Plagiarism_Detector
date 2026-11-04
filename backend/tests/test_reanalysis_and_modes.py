@@ -17,21 +17,27 @@ class TestReanalysisAndModes(unittest.TestCase):
             "Continuous clinical monitoring improves treatment outcomes in modern hospitals."
         )
 
-    def test_offline_mode_sources_and_reanalysis(self):
-        """Verify Offline mode uses local corpus and calculates re-analysis delta accurately."""
-        # Initial analysis in offline mode
+    @patch("app.main.build_online_corpus")
+    def test_online_reanalysis_and_score_delta(self, mock_online):
+        """Verify Online analysis calculates re-analysis delta accurately on revised document."""
+        mock_online.return_value = {
+            "online::core::1": "Clinical diagnosis and healthcare monitoring are essential for hospitalized patients. Medical staff assess patient vital signs and heart rate to detect early signs of disease.",
+            "online::core::2": "Routine health evaluation remains a cornerstone of inpatient patient care in modern hospitals with continuous patient monitoring.",
+        }
+
+        # Initial analysis in online mode
         file_obj = io.BytesIO(self.sample_text.encode("utf-8"))
         res = self.client.post(
             "/api/analyze",
             files={"file": ("report.txt", file_obj, "text/plain")},
-            data={"online": "false", "student_name": "Test Student", "usn": "1VT20CS001"},
+            data={"student_name": "Test Student", "usn": "1VT20CS001"},
         )
         self.assertEqual(res.status_code, 200)
         data = res.json()
-        self.assertEqual(data["analysis_mode"], "offline")
-        self.assertEqual(data["online_sources_compared"], 0)
-        self.assertGreater(data["local_sources_compared"], 0)
-        self.assertGreater(data["total_sources_compared"], 0)
+        self.assertEqual(data["analysis_mode"], "online")
+        self.assertGreater(data["online_sources_compared"], 0)
+        self.assertEqual(data["local_sources_compared"], 0)
+        self.assertEqual(data["total_sources_compared"], data["online_sources_compared"])
         initial_score = data["plagiarism_score"]
 
         # Now test re-analysis of a revised document passing previous_score
@@ -45,7 +51,6 @@ class TestReanalysisAndModes(unittest.TestCase):
             "/api/analyze",
             files={"file": ("corrected_report.txt", revised_file, "text/plain")},
             data={
-                "online": "false",
                 "previous_score": str(initial_score),
                 "is_reanalysis": "true",
             },
@@ -61,7 +66,7 @@ class TestReanalysisAndModes(unittest.TestCase):
     @patch("app.main.search_works")
     @patch("app.main.core_configured", return_value=True)
     def test_online_mode_merges_sources(self, mock_configured, mock_search):
-        """Verify Online mode combines local reference corpus with CORE papers up to CORE_MAX_PAPERS."""
+        """Verify Online mode retrieves CORE papers up to CORE_MAX_PAPERS for comparison."""
         mock_works = [
             CoreWork(
                 title=f"Clinical Monitoring and Patient Health Study {i}",
@@ -86,9 +91,10 @@ class TestReanalysisAndModes(unittest.TestCase):
         data = res.json()
         self.assertEqual(data["analysis_mode"], "online")
         self.assertGreater(data["online_sources_compared"], 0)
+        self.assertEqual(data["local_sources_compared"], 0)
         self.assertEqual(
             data["total_sources_compared"],
-            data["local_sources_compared"] + data["online_sources_compared"],
+            data["online_sources_compared"],
         )
 
     @patch("app.main.search_works")

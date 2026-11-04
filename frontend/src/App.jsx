@@ -31,7 +31,6 @@ function AnalysisWorkspace() {
   const [activeReportView, setActiveReportView] = useState("revised");
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeError, setReanalyzeError] = useState("");
-  const [lastAnalysisMode, setLastAnalysisMode] = useState(false);
   const [activeSentence, setActiveSentence] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [appliedCorrections, setAppliedCorrections] = useState([]);
@@ -40,16 +39,15 @@ function AnalysisWorkspace() {
   const [autoCorrectError, setAutoCorrectError] = useState("");
   const [autoCorrectSummary, setAutoCorrectSummary] = useState(null);
 
-  const handleAnalyze = async (file, online = false) => {
+  const handleAnalyze = async (file) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await analyzeReport(file, online);
+      const res = await analyzeReport(file, true);
       setResult(res);
       setOriginalResult(res);
       setReanalysisResult(null);
       setActiveReportView("revised");
-      setLastAnalysisMode(online);
       setActiveSentence(null);
       setUploadedFile(file);
       setAppliedCorrections([]);
@@ -89,7 +87,7 @@ function AnalysisWorkspace() {
       const correctedFile = new File([correctedBlob], correctedFilename, { type: "text/plain" });
 
       const prevScore = originalResult ? originalResult.plagiarism_score : result?.plagiarism_score;
-      const res = await analyzeReport(correctedFile, lastAnalysisMode, "", false, prevScore, true);
+      const res = await analyzeReport(correctedFile, true, "", false, prevScore, true);
 
       setReanalysisResult(res);
       setResult(res);
@@ -295,31 +293,17 @@ function Results({
               <p className="text-xs font-semibold uppercase tracking-[.14em] text-seal-600">
                 {result.is_reanalysis ? "Re-analyzed report" : "Analysis complete"}
               </p>
-              {result.analysis_mode && (
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                  result.analysis_mode === "online" && result.online_sources_compared > 0
-                    ? "bg-seal-50 text-seal-700 border border-seal-200"
-                    : "bg-ink-100 text-ink-700 border border-ink-200"
-                }`}>
-                  {result.analysis_mode === "online" && result.online_sources_compared > 0
-                    ? "Online Mode · Academic Search"
-                    : "Offline Mode · Local Corpus"}
-                </span>
-              )}
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-seal-50 text-seal-700 border border-seal-200">
+                Online Mode · Academic Search
+              </span>
             </div>
             <h2 className="font-display text-2xl text-ink-900">{result.filename}</h2>
             <p className="mt-2 text-sm text-ink-500">
               {result.flagged_sentence_count} of {result.total_sentences} sentences flagged ·{" "}
-              {result.analysis_mode === "online" && result.online_sources_compared > 0 ? (
-                <span>
-                  <strong className="text-seal-700 font-semibold">{result.total_sources_compared} sources compared</strong>{" "}
-                  ({result.online_sources_compared} online from CORE + {result.local_sources_compared} local)
-                </span>
-              ) : (
-                <span>
-                  <strong className="text-ink-700 font-semibold">{result.total_sources_compared} local sources compared</strong>
-                </span>
-              )}
+              <span>
+                <strong className="text-seal-700 font-semibold">{result.total_sources_compared} online academic sources compared</strong>{" "}
+                (retrieved via CORE)
+              </span>
             </p>
             <p className="mt-3 text-xs text-ink-400">
               {result.similarity_method?.semantic_available

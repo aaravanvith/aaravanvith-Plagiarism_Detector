@@ -1,8 +1,6 @@
-from pathlib import Path
 import logging
 import os
 import shutil
-import threading
 import re
 from time import perf_counter
 
@@ -12,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from .database import AcademicDocument, DocumentParagraph, init_db, get_db, Report, SessionLocal
+from .database import AcademicDocument, DocumentParagraph, init_db, get_db, Report
 from .services.extract import extract_text
 from .services.preprocessing import clean_text
 from .services.similarity import analyze_document
@@ -24,45 +22,24 @@ from .services.document_correction import (
     CorrectionValidationError, create_corrected_file, parse_corrections,
 )
 from .services.core_client import CoreConfigurationError, CoreRequestError, configured as core_configured, search_works
-from .services.repository import add_document, content_hash, document_summary
-from .settings import CORE_MAX_PAGES, CORE_MAX_PAPERS
+from .services.repository import add_document, document_summary
+from .settings import (
+    CORE_MAX_PAGES,
+    CORE_MAX_PAPERS,
+    ONLINE_MIN_PAPERS,
+    ONLINE_MAX_PAPERS_PER_PROVIDER,
+)
 
-def get_reference_corpus_dir() -> Path:
-    env_dir = os.getenv("REFERENCE_CORPUS_DIR")
-    if env_dir and Path(env_dir).exists():
-        return Path(env_dir)
-    candidates = [
-        Path(__file__).resolve().parent.parent / "reference_corpus",
-        Path(__file__).resolve().parent.parent.parent / "reference_corpus",
-        Path(__file__).resolve().parent.parent.parent / "backend" / "reference_corpus",
-        Path.cwd() / "reference_corpus",
-        Path.cwd() / "backend" / "reference_corpus",
-    ]
-    for c in candidates:
-        if c.exists() and any(c.glob("*.txt")):
-            return c
-    return candidates[0]
+from .services.openalex_client import (
+    OpenAlexRequestError,
+    search_works as search_openalex,
+)
 
+from .services.semantic_scholar_client import (
+    SemanticScholarRequestError,
+    search_works as search_semantic_scholar,
+)
 
-def get_healthcare_corpus_dir() -> Path:
-    env_dir = os.getenv("HEALTHCARE_CORPUS_DIR")
-    if env_dir and Path(env_dir).exists():
-        return Path(env_dir)
-    candidates = [
-        Path(__file__).resolve().parent.parent / "healthcare_datasets" / "pubmed",
-        Path(__file__).resolve().parent.parent.parent / "healthcare_datasets" / "pubmed",
-        Path(__file__).resolve().parent.parent.parent / "backend" / "healthcare_datasets" / "pubmed",
-        Path.cwd() / "healthcare_datasets" / "pubmed",
-        Path.cwd() / "backend" / "healthcare_datasets" / "pubmed",
-    ]
-    for c in candidates:
-        if c.exists() and any(c.glob("*.txt")):
-            return c
-    return candidates[0]
-
-
-REFERENCE_CORPUS_DIR = get_reference_corpus_dir()
-HEALTHCARE_CORPUS_DIR = get_healthcare_corpus_dir()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="VTU Report Plagiarism Detector API", version="1.0.0")
@@ -103,113 +80,10 @@ def is_healthcare_report(text: str) -> bool:
 @app.on_event("startup")
 def on_startup():
     init_db()
-    db = SessionLocal()
-    try:
-        _reference_corpus_cache.rebuild(db)
-    finally:
-        db.close()
-
-
-
-class ReferenceCorpusCache:
-    """Cache static references while retaining prior student reports dynamically."""
-
-    def __init__(self):
-        self._lock = threading.RLock()
-        self._corpus: dict[str, str] | None = None
-
-    def rebuild(self, db: Session) -> None:
-        ref_dir = get_reference_corpus_dir()
-        healthcare_dir = get_healthcare_corpus_dir()
-
-        corpus: dict[str, str] = {}
-        ref_count = 0
-        if ref_dir.exists():
-            for source_file in ref_dir.glob("*.txt"):
-                try:
-                    text = source_file.read_text(encoding="utf-8", errors="ignore").strip()
-                    if text:
-                        corpus[source_file.stem] = text
-                        ref_count += 1
-                except Exception as exc:
-                    logger.warning("Failed to read reference file %s: %s", source_file, exc)
-        else:
-            logger.warning("Reference corpus directory not found at %s", ref_dir)
-
-        pubmed_count = 0
-        if healthcare_dir.exists():
-            for source_file in sorted(healthcare_dir.glob("*.txt")):
-                try:
-                    text = source_file.read_text(encoding="utf-8", errors="ignore").strip()
-                    if text:
-                        corpus[f"pubmed::{source_file.stem}"] = text
-                        pubmed_count += 1
-                except Exception as exc:
-                    logger.warning("Failed to read healthcare file %s: %s", source_file, exc)
-        else:
-            logger.warning("Healthcare dataset directory not found at %s", healthcare_dir)
-
-        known_content = {content_hash(text) for text in corpus.values()}
-        for document in db.query(AcademicDocument).filter(
-            AcademicDocument.source_report_id.is_(None),
-            AcademicDocument.is_archived.is_(False),
-        ).all():
-            fingerprint = content_hash(document.text)
-            if fingerprint not in known_content:
-                corpus[f"repository::{document.title or document.filename}"] = document.text
-                known_content.add(fingerprint)
-        with self._lock:
-            self._corpus = corpus
-        invalidate_reference_embedding_cache()
-        logger.info(
-            "Reference corpus cache rebuilt: %d reference papers, %d pubmed papers, %d total sources",
-            ref_count,
-            pubmed_count,
-            len(corpus),
-        )
-
-    def invalidate(self) -> None:
-        with self._lock:
-            self._corpus = None
-        invalidate_reference_embedding_cache()
-
-    def static_corpus(self, db: Session) -> dict[str, str]:
-        with self._lock:
-            cached = self._corpus
-        if cached is None:
-            self.rebuild(db)
-            with self._lock:
-                cached = self._corpus
-        return dict(cached or {})
-
-
-_reference_corpus_cache = ReferenceCorpusCache()
 
 
 def invalidate_reference_corpus_cache() -> None:
-    _reference_corpus_cache.invalidate()
-
-
-def load_reference_corpus(db: Session, current_filename: str = "") -> dict[str, str]:
-    """
-    Load only the repository/reference documents.
-    Do NOT compare against previous student submissions.
-    """
-    corpus = _reference_corpus_cache.static_corpus(db)
-
-    print("=" * 80)
-    print("REFERENCE CORPUS")
-    print("=" * 80)
-    print("Total sources:", len(corpus))
-
-    count = 0
-    for key in corpus.keys():
-        print(key)
-        count += 1
-        if count >= 20:
-            break
-
-    return corpus
+    invalidate_reference_embedding_cache()
 
 def build_online_corpus(text: str) -> dict[str, str]:
     """
@@ -281,7 +155,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
         )
         raise HTTPException(
             status_code=400,
-            detail="Could not extract search keywords from the report for online academic search. Please provide more text or switch to Offline mode.",
+            detail="Could not extract search keywords from the report for online academic search. Please provide more text.",
         )
 
     query = " ".join(keywords)
@@ -343,7 +217,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
             if not online_corpus:
                 raise HTTPException(
                     status_code=400,
-                    detail="Online academic search requires a valid CORE_API_KEY. Configure CORE_API_KEY in backend/.env or switch to Offline mode.",
+                    detail="Online academic search requires a valid CORE_API_KEY. Configure CORE_API_KEY in backend/.env.",
                 )
             break
 
@@ -392,7 +266,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
                     if not online_corpus:
                         raise HTTPException(
                             status_code=502,
-                            detail=f"Online academic search failed: {retry_exc}. Please check your internet connection and CORE API key, or switch to Offline mode.",
+                            detail=f"Online academic search failed: {retry_exc}. Please check your internet connection and CORE API key.",
                         )
                     break
 
@@ -400,7 +274,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
                 if not online_corpus:
                     raise HTTPException(
                         status_code=502,
-                        detail=f"Online academic search failed: {exc}. Please check your internet connection and CORE API key, or switch to Offline mode.",
+                        detail=f"Online academic search failed: {exc}. Please check your internet connection and CORE API key.",
                     )
                 break
 
@@ -550,7 +424,7 @@ def build_online_corpus(text: str) -> dict[str, str]:
             status_code=502,
             detail=(
                 "Online academic search could not retrieve matching academic papers from CORE for this query. "
-                "Please refine the document keywords or switch to Offline mode."
+                "Please refine the document keywords."
             ),
         )
 
@@ -575,7 +449,7 @@ def analyze(
     file: UploadFile = File(...),
     student_name: str = Form(""),
     usn: str = Form(""),
-    online: bool = Form(False),
+    online: bool = Form(True),
     previous_score: float | None = Form(None),
     is_reanalysis: bool = Form(False),
     db: Session = Depends(get_db),
@@ -605,50 +479,13 @@ def analyze(
     )
 
     corpus_started = perf_counter()
+    online_corpus = build_online_corpus(text)
+    corpus = online_corpus
 
-    local_corpus = load_reference_corpus(db, file.filename)
-
-    if online:
-        online_corpus = build_online_corpus(text)
-        if not online_corpus:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    "Online academic search could not retrieve matching academic papers from CORE for this query. "
-                    "Please refine the document keywords or switch to Offline mode."
-                ),
-            )
-
-        corpus = {
-            **local_corpus,
-            **online_corpus,
-        }
-
-        logger.info(
-            "ONLINE ANALYSIS: local=%d + online=%d = total=%d",
-            len(local_corpus),
-            len(online_corpus),
-            len(corpus),
-        )
-    else:
-        online_corpus = {}
-        if not local_corpus:
-            logger.error("Offline analysis failed: local academic dataset is empty or unreadable.")
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Local reference dataset is unavailable or empty. "
-                    "Ensure the local corpus files are present in the dataset directory."
-                ),
-            )
-        corpus = local_corpus
-
-        logger.info(
-            "OFFLINE ANALYSIS: local=%d + online=0 = total=%d",
-            len(local_corpus),
-            len(corpus),
-        )
-
+    logger.info(
+        "ONLINE ANALYSIS: retrieved %d online academic sources",
+        len(online_corpus),
+    )
     logger.info(
         "Corpus loading completed in %.3fs",
         perf_counter() - corpus_started,
@@ -725,8 +562,8 @@ def analyze(
         "verdict": sim_report.verdict,
         "total_sources_compared": len(corpus),
         "sources_compared": _format_sources_preview(sim_report.sources_used, online_corpus),
-        "analysis_mode": "online" if online else "offline",
-        "local_sources_compared": len(local_corpus),
+        "analysis_mode": "online",
+        "local_sources_compared": 0,
         "online_sources_compared": len(online_corpus),
         "total_sentences": len(sim_report.sentence_matches),
         "flagged_sentence_count": len(flagged),
@@ -956,59 +793,19 @@ def list_repository_documents(
             AcademicDocument.keywords.ilike(pattern)
         )
     documents = query.order_by(AcademicDocument.created_at.desc()).limit(min(max(limit, 1), 500)).all()
-    summaries = [document_summary(document) for document in documents]
-
-    # If DB documents are fewer than limit, surface bundled static corpus documents so
-    # users can view and search through the 473 local reference sources.
-    if len(summaries) < limit:
-        static_corpus = load_reference_corpus(db)
-        remaining_slots = limit - len(summaries)
-        q_lower = q.lower().strip()
-        for idx, (source_key, text) in enumerate(static_corpus.items(), start=1):
-            if remaining_slots <= 0:
-                break
-            if q_lower and q_lower not in source_key.lower() and q_lower not in text[:200].lower():
-                continue
-            is_pubmed = source_key.startswith("pubmed::")
-            clean_name = source_key.replace("pubmed::", "")
-            title = f"PubMed Article {clean_name}" if is_pubmed else clean_name.replace("_", " ").title()
-            words = len(text.split())
-            summaries.append({
-                "id": f"bundled-{idx}",
-                "document_id": f"bundled-{source_key}",
-                "filename": f"{clean_name}.txt",
-                "title": title,
-                "student_name": None,
-                "usn": None,
-                "department": "Healthcare",
-                "semester": None,
-                "subject": "Medical Research",
-                "project_type": "Bundled Local Reference",
-                "keywords": ["healthcare", "pubmed", "peer-reviewed", "academic-reference"] if is_pubmed else ["reference-corpus"],
-                "word_count": words,
-                "page_count": max(1, words // 300),
-                "version": 1,
-                "approval_status": "approved",
-                "is_archived": False,
-            })
-            remaining_slots -= 1
-
-    return summaries
+    return [document_summary(document) for document in documents]
 
 
 @app.get("/api/repository/stats")
 def repository_stats(db: Session = Depends(get_db)):
     documents = db.query(AcademicDocument).filter(AcademicDocument.is_archived.is_(False)).all()
-    static_corpus = load_reference_corpus(db)
-    bundled_count = len(static_corpus)
-    static_words = sum(len(text.split()) for text in static_corpus.values())
     db_words = sum(document.word_count for document in documents)
     return {
-        "total_documents": len(documents) + bundled_count,
-        "bundled_sources": bundled_count,
+        "total_documents": len(documents),
+        "bundled_sources": 0,
         "uploaded_documents": len(documents),
         "total_paragraphs": db.query(DocumentParagraph).count(),
-        "total_words": static_words + db_words,
+        "total_words": db_words,
         "pending_approval": sum(document.approval_status == "pending" for document in documents),
     }
 

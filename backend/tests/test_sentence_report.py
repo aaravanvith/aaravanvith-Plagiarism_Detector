@@ -73,11 +73,10 @@ class TestSentenceReportBackend(unittest.TestCase):
             "pubmed::sample2": "Medical diagnosis improves patient health outcomes through careful clinical data analysis.",
         }
 
-        with patch("app.main.load_reference_corpus", return_value=mock_corpus):
+        with patch("app.main.build_online_corpus", return_value=mock_corpus):
             response = self.client.post(
                 "/api/analyze",
                 files={"file": ("report.txt", text.encode("utf-8"), "text/plain")},
-                data={"online": "false"},
             )
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()

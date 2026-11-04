@@ -18,7 +18,6 @@ after cloning:
 - `backend/.env` and `frontend/.env` - local configuration and secrets
 - `backend/data/app.db` - SQLite database, created on backend startup
 - `backend/data/ai_detector.joblib` - generated AI-detection model
-- `backend/reference_corpus/chromadb/` - optional generated Chroma vector store
 - Python virtual environments, `frontend/node_modules`, build output, and logs
 
 Use the committed templates [backend/.env.example](backend/.env.example) and
@@ -122,10 +121,8 @@ when the backend runs on another host or port, then restart Vite.
   download the `all-MiniLM-L6-v2` sentence-transformer model. For an entirely
   offline initial run, set `ENABLE_SEMANTIC_SIMILARITY=false` in `backend/.env`
   before starting the backend. TF-IDF/cosine analysis still works.
-- Sample documents in `backend/reference_corpus/` are used immediately as the
-  comparison corpus. Add your own `.txt` references there and restart the
-  backend to load them. The optional Chroma database is generated separately
-  and is not required by the web app.
+- Dynamic online analysis retrieves relevant peer-reviewed papers from CORE.
+  Set a valid `CORE_API_KEY` in `backend/.env`.
 
 ## Optional services
 
@@ -162,10 +159,6 @@ npm run build
 python scripts/migrate.py
 ```
 
-The `backend/scripts/download_pubmed.py`, `import_pubmed.py`, and
-`build_database.py` utilities are optional corpus-maintenance tools. They are
-not required to run the web application.
-
 ## Main API endpoints
 
 - `POST /api/analyze` - analyze an uploaded report
@@ -185,7 +178,6 @@ not required to run the web application.
 backend/
   app/                 FastAPI application and analysis services
   data/                Generated SQLite database and local model (ignored)
-  reference_corpus/    Tracked starter comparison documents; generated Chroma data is ignored
   .env.example         Backend configuration template
   requirements.txt     Python dependencies
 frontend/

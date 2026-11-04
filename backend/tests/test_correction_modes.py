@@ -525,8 +525,8 @@ class TestCorrectionApiEndpoints(unittest.TestCase):
         self.assertTrue(corrected_content.startswith("Introduction. "))
         self.assertTrue(corrected_content.endswith(" Conclusion."))
 
-    @patch("app.main.load_reference_corpus", return_value={"ref_1": "Nephritic syndrome is characterized by hematuria, hypertension, and red blood cell casts."})
-    def test_reanalysis_flow_after_applying_correction(self, mock_corpus):
+    @patch("app.main.build_online_corpus", return_value={"online::core::1": SAMPLE_NEPHRITIC_SENTENCE})
+    def test_reanalysis_flow_after_applying_correction(self, mock_online):
         """Full re-analysis flow: original document analyzed -> corrected via auto-correct -> re-analyzed."""
         original_doc = (
             "Medical report on renal disease diagnosis and clinical patient treatment. "
@@ -538,11 +538,10 @@ class TestCorrectionApiEndpoints(unittest.TestCase):
         analyze_res = self.client.post(
             "/api/analyze",
             files={"file": ("report.txt", io.BytesIO(original_doc.encode("utf-8")), "text/plain")},
-            data={"mode": "offline"},
         )
         self.assertEqual(analyze_res.status_code, 200)
         initial_data = analyze_res.json()
-        self.assertEqual(initial_data["analysis_mode"], "offline")
+        self.assertEqual(initial_data["analysis_mode"], "online")
         self.assertIn("plagiarism_score", initial_data)
 
         # 2. Generate and apply correction
@@ -573,15 +572,14 @@ class TestCorrectionApiEndpoints(unittest.TestCase):
         reanalyze_res = self.client.post(
             "/api/analyze",
             files={"file": ("report.txt", io.BytesIO(corrected_content), "text/plain")},
-            data={"mode": "offline"},
         )
         self.assertEqual(reanalyze_res.status_code, 200)
         reanalyze_data = reanalyze_res.json()
-        self.assertEqual(reanalyze_data["analysis_mode"], "offline")
+        self.assertEqual(reanalyze_data["analysis_mode"], "online")
         self.assertIn("plagiarism_score", reanalyze_data)
         # Verify valid updated report generated from actual text
         self.assertIsInstance(reanalyze_data["plagiarism_score"], (int, float))
-        self.assertGreater(reanalyze_data["local_sources_compared"], 0)
+        self.assertGreater(reanalyze_data["online_sources_compared"], 0)
 
 
 if __name__ == "__main__":
